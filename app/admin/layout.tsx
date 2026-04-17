@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
-import { QrCode, Users, Trophy, LogOut, UserCircle, FileText } from 'lucide-react';
+import { QrCode, Users, Trophy, LogOut, UserCircle, FileText, FileSpreadsheet } from 'lucide-react';
 import ConfirmModal from '@/components/ConfirmModal';
 
 export default function AdminLayout({
@@ -43,6 +43,7 @@ export default function AdminLayout({
     { name: 'Layar QR Code', href: '/admin/qr', icon: QrCode },
     { name: 'Kelola User', href: '/admin/users', icon: Users },
     { name: 'Kelola Presensi', href: '/admin/attendance', icon: FileText },
+    { name: 'Laporan Bulanan', href: '/admin/reports', icon: FileSpreadsheet },
     { name: 'Leaderboard', href: '/admin/leaderboard', icon: Trophy },
   ];
 

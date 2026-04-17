@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    const { attendanceId } = await request.json();
+    const { attendanceId, masukTime, pulangTime } = await request.json();
     if (!attendanceId) return NextResponse.json({ error: 'Missing attendanceId' }, { status: 400 });
 
     const adminClient = createAdminClient();
@@ -33,27 +33,71 @@ export async function POST(request: NextRequest) {
 
     if (getError || !attendance) return NextResponse.json({ error: 'Data not found' }, { status: 404 });
     
-    // Check if it's already processed or not a late record
-    if (attendance.status !== 'terlambat') {
-      return NextResponse.json({ error: 'Record is not a late record' }, { status: 400 });
+    // Check if it's already processed or not a late record or lupa record
+    const isLupa = attendance.jenis === 'lupa_absen';
+    const isLate = attendance.status === 'terlambat';
+
+    if (!isLupa && !isLate) {
+      return NextResponse.json({ error: 'Record cannot be restored (not late or forgot scan)' }, { status: 400 });
     }
 
-    // 2. IMPORTANT: Revert the point deduction
-    // If it was late (-1), we add +1 back to restore to 0 change
+    // 2. Prepare Point Restoration
     const pointsToRestore = Math.abs(attendance.points_change || 0);
     
     // 3. Update the record status
-    const { error: updateError } = await adminClient
-      .from('attendance')
-      .update({
-        status: 'hadir', // Change from 'terlambat' to 'hadir'
-        approval_status: 'dispute_approved',
-        points_change: 0, // Reset points change to 0
-        approved_by: adminUser.id
-      })
-      .eq('id', attendanceId);
+    if (isLupa) {
+      // Logic for Forgotten Scan: Split into Masuk & Pulang
+      const date = attendance.tanggal;
+      const finalMasuk = masukTime ? `${date}T${masukTime}:00` : `${date}T08:00:00`;
+      const finalPulang = pulangTime ? `${date}T${pulangTime}:00` : `${date}T16:00:00`;
 
-    if (updateError) throw updateError;
+      // Transform current record to 'masuk'
+      const { error: updateError } = await adminClient
+        .from('attendance')
+        .update({
+          jenis: 'masuk',
+          status: 'hadir',
+          waktu_absen: new Date(finalMasuk).toISOString(),
+          approval_status: 'dispute_approved',
+          points_change: 0,
+          approved_by: adminUser.id,
+          keterangan: (attendance.keterangan || '') + ' (Lupa Absen Dipulihkan: Masuk)'
+        })
+        .eq('id', attendanceId);
+
+      if (updateError) throw updateError;
+
+      // Insert new 'pulang' record
+      const { error: insertError } = await adminClient
+        .from('attendance')
+        .insert({
+          user_id: attendance.user_id,
+          tanggal: date,
+          jenis: 'pulang',
+          status: 'hadir',
+          waktu_absen: new Date(finalPulang).toISOString(),
+          approval_status: 'dispute_approved',
+          points_change: 0,
+          approved_by: adminUser.id,
+          keterangan: 'Lupa Absen Dipulihkan: Pulang'
+        });
+
+      if (insertError) throw insertError;
+
+    } else {
+      // Logic for Late Record: Just Revert Status
+      const { error: updateError } = await adminClient
+        .from('attendance')
+        .update({
+          status: 'hadir',
+          approval_status: 'dispute_approved',
+          points_change: 0,
+          approved_by: adminUser.id
+        })
+        .eq('id', attendanceId);
+
+      if (updateError) throw updateError;
+    }
 
     // 4. Update the User's total points
     if (pointsToRestore !== 0) {

@@ -142,16 +142,37 @@ export default function AdminLeaderboardPage() {
     setLoading(false);
   }
 
-  async function handleRestore(attendanceId: string) {
+  // Time Picker Modal State
+  const [isTimeModalOpen, setIsTimeModalOpen] = useState(false);
+  const [selectedLupaId, setSelectedLupaId] = useState<string | null>(null);
+  const [masukTimeInput, setMasukTimeInput] = useState('08:00');
+  const [pulangTimeInput, setPulangTimeInput] = useState('16:00');
+
+
+  async function handleRestore(attendanceId: string, isLupa: boolean = false) {
     if (!attendanceId) return;
+
+    if (isLupa && !isTimeModalOpen) {
+      setSelectedLupaId(attendanceId);
+      setIsTimeModalOpen(true);
+      return;
+    }
+
     setActionLoading(attendanceId);
     try {
       const res = await fetch('/api/admin/attendance/restore', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ attendanceId })
+        body: JSON.stringify({ 
+          attendanceId,
+          masukTime: isLupa ? masukTimeInput : undefined,
+          pulangTime: isLupa ? pulangTimeInput : undefined
+        })
       });
-      if (res.ok) { fetchLeaderboard(); }
+      if (res.ok) { 
+        setIsTimeModalOpen(false);
+        fetchLeaderboard(); 
+      }
       else { const err = await res.json(); alert(err.error); }
     } catch (err) { console.error(err); } finally { setActionLoading(null); }
   }
@@ -360,7 +381,7 @@ export default function AdminLeaderboardPage() {
                                 
                                 {entry.approval_status !== 'dispute_approved' && (
                                    <button
-                                      onClick={() => handleRestore(entry.masuk_id!)}
+                                      onClick={() => handleRestore(entry.masuk_id!, entry.masuk_status === 'LUPA ABSEN')}
                                       disabled={actionLoading === entry.masuk_id}
                                       className="text-[10px] font-bold text-slate-400 hover:text-emerald-600 transition-colors uppercase tracking-tight"
                                    >
@@ -399,6 +420,56 @@ export default function AdminLeaderboardPage() {
       <div className="text-center">
          <p className="text-[10px] font-black text-slate-300 uppercase tracking-[0.4em]">Terakhir diperbarui: {lastUpdated}</p>
       </div>
+
+      {/* Time Selection Modal for Lupa Absen */}
+      {isTimeModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-sm rounded-[32px] p-8 shadow-2xl border border-slate-100 animate-in fade-in zoom-in duration-200">
+            <div className="w-16 h-16 bg-amber-50 text-amber-500 rounded-2xl flex items-center justify-center mb-6">
+              <Clock size={32} />
+            </div>
+            
+            <h3 className="text-xl font-black text-slate-900 mb-2">Lengkapi Jam Kerja</h3>
+            <p className="text-slate-500 text-sm mb-6 font-medium">Pegawai ini lupa absen. Mohon tentukan jam masuk dan pulang aslinya untuk rekap bulanan.</p>
+
+            <div className="space-y-4 mb-8">
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">Jam Masuk</label>
+                <input 
+                  type="time" 
+                  value={masukTimeInput}
+                  onChange={(e) => setMasukTimeInput(e.target.value)}
+                  className="w-full bg-slate-50 border-none rounded-2xl px-4 py-3 font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 transition-all"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">Jam Pulang</label>
+                <input 
+                  type="time" 
+                  value={pulangTimeInput}
+                  onChange={(e) => setPulangTimeInput(e.target.value)}
+                  className="w-full bg-slate-50 border-none rounded-2xl px-4 py-3 font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 transition-all"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <button 
+                onClick={() => setIsTimeModalOpen(false)}
+                className="py-4 rounded-2xl font-black text-xs uppercase tracking-widest text-slate-400 hover:bg-slate-50 transition-all"
+              >
+                Batal
+              </button>
+              <button 
+                onClick={() => handleRestore(selectedLupaId!, true)}
+                className="py-4 bg-amber-500 rounded-2xl font-black text-xs uppercase tracking-widest text-white shadow-lg shadow-amber-200 hover:bg-amber-600 active:scale-95 transition-all flex items-center justify-center gap-2"
+              >
+                {actionLoading ? <RefreshCw className="animate-spin text-white" size={16} /> : 'Simpan Presensi'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
