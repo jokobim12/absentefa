@@ -67,8 +67,8 @@ export async function POST(request: NextRequest) {
       .eq('user_id', user.id)
       .eq('tanggal', todayWITA);
 
-    const hasMasuk = attendanceToday?.some(a => a.jenis === 'masuk');
-    const hasPulang = attendanceToday?.some(a => a.jenis === 'pulang');
+    const hasMasuk = attendanceToday?.some((a: any) => a.jenis === 'masuk');
+    const hasPulang = attendanceToday?.some((a: any) => a.jenis === 'pulang');
 
     if (!finalJenis) {
       finalJenis = hasMasuk ? 'pulang' : 'masuk';
