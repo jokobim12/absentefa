@@ -16,7 +16,8 @@ CHECK (jenis IN ('masuk', 'pulang', 'izin', 'sakit'));
 ALTER TABLE public.attendance 
 ADD COLUMN IF NOT EXISTS keterangan TEXT,
 ADD COLUMN IF NOT EXISTS approval_status TEXT DEFAULT 'approved',
-ADD COLUMN IF NOT EXISTS points_change INTEGER DEFAULT 0;
+ADD COLUMN IF NOT EXISTS points_change INTEGER DEFAULT 0,
+ADD COLUMN IF NOT EXISTS approved_by UUID;
 
 -- Update approval_status untuk data lama
 UPDATE public.attendance SET approval_status = 'approved' WHERE approval_status IS NULL;

@@ -108,7 +108,7 @@ export default function LeaderboardPage() {
             <ChevronLeft size={24} />
           </button>
           <div className="text-center">
-             <h1 className="text-xl font-bold text-slate-900 tracking-tight">Leaderboard WIB</h1>
+             <h1 className="text-xl font-bold text-slate-900 tracking-tight">Leaderboard WITA</h1>
              <p className="text-xs text-slate-500 font-medium">{todayDate}</p>
           </div>
           <button onClick={() => {setLoading(true); fetchLeaderboard();}} className="text-slate-400 hover:text-blue-600 transition-colors">
@@ -130,7 +130,7 @@ export default function LeaderboardPage() {
             </div>
             <h3 className="text-lg font-bold text-slate-900 mb-2">Belum Ada Data</h3>
             <p className="text-slate-500 text-sm mb-6 max-w-xs mx-auto">
-              Jadilah orang pertama yang melakukan absensi hari ini pukul 07:00!
+              Jadilah orang pertama yang melakukan absensi hari ini pukul 08:00!
             </p>
             <Link href="/login" className="btn-primary inline-flex">Masuk Sekarang</Link>
           </div>

@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Camera, QrCode, X, CheckCircle2, AlertCircle, RefreshCw, Trophy, LogOut, ChevronRight, User, MousePointer2, FileText, Send, Star } from 'lucide-react';
+import { Camera, QrCode, X, CheckCircle2, AlertCircle, RefreshCw, Trophy, LogOut, ChevronRight, User, MousePointer2, FileText, Send, Star, Clock } from 'lucide-react';
 import ConfirmModal from '@/components/ConfirmModal';
 
 type ScanState = 'idle' | 'takingSelfie' | 'scanning' | 'submitting' | 'success' | 'error';
@@ -31,7 +31,10 @@ export default function AbsenPage() {
   const [isIzinModalOpen, setIsIzinModalOpen] = useState(false);
   const [izinData, setIzinData] = useState({ jenis: 'izin', keterangan: '', foto: '' });
   const [izinPreview, setIzinPreview] = useState<string | null>(null);
+  const [attendanceStatus, setAttendanceStatus] = useState<string | null>(null);
+  const [lastAttendanceId, setLastAttendanceId] = useState<string | null>(null);
   const [isSubmittingIzin, setIsSubmittingIzin] = useState(false);
+  const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false);
 
   // Get current user info & daily status
   useEffect(() => {
@@ -44,18 +47,19 @@ export default function AbsenPage() {
       setAvatarUrl(profile?.avatar_url || '');
       setUserPoints(profile?.points || 0);
 
-      const todayWIB = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date());
+      const todayWITA = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Makassar' }).format(new Date());
+      
       const { data: attendanceToday } = await supabase
         .from('attendance')
         .select('jenis')
         .eq('user_id', user.id)
-        .eq('tanggal', todayWIB);
+        .eq('tanggal', todayWITA);
 
       const hasMasuk = attendanceToday?.some(a => a.jenis === 'masuk');
       setCurrentJenis(hasMasuk ? 'pulang' : 'masuk');
     }
     fetchData();
-  }, []);
+  }, [isSuccessModalOpen]); // Refresh points when success modal is closed
 
   // Cleanup cameras on lifecycle end
   useEffect(() => {
@@ -143,13 +147,17 @@ export default function AbsenPage() {
         return;
       }
 
-      setScanState('success');
-      const jam = new Date(data.waktu_absen).toLocaleTimeString('id-ID', {
+      const formatTime = (isoString: string) => new Date(isoString).toLocaleTimeString('id-ID', {
         hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Asia/Jakarta',
       });
-      setWaktuAbsen(jam);
+
+      setWaktuAbsen(formatTime(data.waktu_absen));
       setAbsenStatus(data.status || 'hadir');
-      setSuccessMsg(data.message || 'Absensi berhasil diverifikasi!');
+      setSuccessMsg(data.status === 'terlambat' ? 'Presensi masuk berhasil, namun Anda terdeteksi terlambat.' : 'Presensi harian Anda telah berhasil direkam.');
+      setAttendanceStatus(data.status);
+      setLastAttendanceId(data.id);
+      setIsSuccessModalOpen(true);
+      setScanState('idle'); 
     } catch {
       setScanState('error');
       setErrorMsg('Masalah jaringan. Harap coba lagi.');
@@ -172,11 +180,13 @@ export default function AbsenPage() {
 
       if (res.ok) {
         setIsIzinModalOpen(false);
-        setScanState('success');
         setWaktuAbsen('Terkirim');
         setAbsenStatus('');
         setSuccessMsg('Pengajuan izin berhasil terkirim. Mohon tunggu verifikasi admin.');
         setIzinData({ jenis: 'izin', keterangan: '', foto: '' });
+        setIzinPreview(null);
+        setIsSuccessModalOpen(true);
+        setScanState('idle');
       } else {
         const data = await res.json();
         alert(data.error === 'Gagal mengirim pengajuan' ? 'Gagal: Pastikan Anda sudah menjalankan SQL Migration di Supabase Console.' : (data.error || 'Gagal mengirim izin'));
@@ -286,10 +296,10 @@ export default function AbsenPage() {
              </div>
            </Link>
             <div className="flex gap-2">
-              <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-50 rounded-xl border border-amber-100">
+              <Link href="/points" className="flex items-center gap-2 px-3 py-1.5 bg-amber-50 rounded-xl border border-amber-100 hover:bg-amber-100 transition-colors">
                 <Star size={14} className="text-amber-500 fill-amber-500" />
                 <span className="text-xs font-black text-amber-700">{userPoints}</span>
-              </div>
+              </Link>
               <Link href="/leaderboard" className="w-10 h-10 border border-slate-200 rounded-xl flex items-center justify-center text-slate-400 hover:text-slate-900 hover:bg-slate-50 transition-all">
                 <Trophy size={18} />
               </Link>
@@ -326,9 +336,14 @@ export default function AbsenPage() {
                 <button onClick={startAttendanceProcess} className={`w-full ${currentJenis === 'masuk' ? 'bg-slate-900 hover:bg-black' : 'bg-blue-600 hover:bg-blue-700'} text-white font-bold py-5 rounded-2xl transition-all active:scale-95 flex items-center justify-center gap-3 text-base shadow-xl shadow-slate-200`}>
                   Absen {currentJenis === 'masuk' ? 'Masuk' : 'Pulang'} <ChevronRight size={20} />
                 </button>
-                <button onClick={() => setIsIzinModalOpen(true)} className="w-full bg-white border border-slate-200 text-slate-600 font-bold py-4 rounded-2xl hover:bg-slate-50 transition-all flex items-center justify-center gap-2">
-                  <FileText size={18} /> Pengajuan Izin
-                </button>
+                <div className="grid grid-cols-2 gap-3">
+                  <button onClick={() => setIsIzinModalOpen(true)} className="bg-white border border-slate-200 text-slate-600 font-bold py-4 rounded-2xl hover:bg-slate-50 transition-all flex items-center justify-center gap-2 text-sm">
+                    <FileText size={18} /> Izin / Sakit
+                  </button>
+                  <Link href="/leaderboard" className="bg-white border border-slate-200 text-slate-600 font-bold py-4 rounded-2xl hover:bg-slate-50 transition-all flex items-center justify-center gap-2 text-sm">
+                    <Trophy size={18} /> Peringkat
+                  </Link>
+                </div>
               </div>
             </div>
           )}
@@ -405,59 +420,6 @@ export default function AbsenPage() {
             </div>
           )}
 
-          {/* RESULT: SUCCESS */}
-          {scanState === 'success' && (
-            <div className="bg-white rounded-[32px] p-10 border border-emerald-100 shadow-sm text-center animate-in zoom-in duration-500">
-               <div className="w-20 h-20 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-6">
-                  <CheckCircle2 size={44} />
-               </div>
-               <h2 className="text-2xl font-black text-slate-900 mb-1 leading-tight">
-                 {waktuAbsen === 'Terkirim' ? 'Pengajuan Berhasil!' : 'Absensi Berhasil!'}
-               </h2>
-               <div className="my-8">
-                  <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mb-1">
-                    {waktuAbsen === 'Terkirim' ? 'Status Pengajuan' : 'Tercatat Pada'}
-                  </p>
-                  <p className="text-4xl font-mono font-black text-slate-900">{waktuAbsen}</p>
-               </div>
-
-               <div className="mb-8">
-                  {waktuAbsen === 'Terkirim' ? (
-                    <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4">
-                       <p className="text-blue-600 font-bold text-sm tracking-tight flex items-center justify-center gap-2">
-                          <Clock size={16} /> Menunggu Verifikasi
-                       </p>
-                    </div>
-                  ) : absenStatus === 'terlambat' ? (
-                    <div className="bg-rose-50 border border-rose-100 rounded-2xl p-4 animate-bounce">
-                       <p className="text-rose-600 font-bold text-sm tracking-tight flex items-center justify-center gap-2">
-                          <AlertCircle size={16} /> Status: Anda Terlambat
-                       </p>
-                    </div>
-                  ) : absenStatus === 'pulang_cepat' ? (
-                    <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4">
-                       <p className="text-amber-600 font-bold text-sm tracking-tight flex items-center justify-center gap-2">
-                          <AlertCircle size={16} /> Status: Pulang Cepat
-                       </p>
-                    </div>
-                  ) : (
-                    <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4">
-                       <p className="text-emerald-600 font-bold text-sm tracking-tight flex items-center justify-center gap-2">
-                          <CheckCircle2 size={16} /> Status: Tepat Waktu
-                       </p>
-                    </div>
-                  )}
-               </div>
-
-               <p className="text-slate-500 text-sm mb-10 px-4 leading-relaxed">{successMsg}</p>
-
-               <div className="space-y-3">
-                  <Link href="/leaderboard" className="block w-full bg-slate-900 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-slate-200">Cek Leaderboard</Link>
-                  <button onClick={() => window.location.reload()} className="block w-full py-4 text-slate-400 font-bold text-sm hover:text-slate-900">Selesai</button>
-               </div>
-            </div>
-          )}
-
           {/* RESULT: ERROR */}
           {scanState === 'error' && (
             <div className="bg-white rounded-[32px] p-10 border border-rose-100 shadow-sm text-center animate-in zoom-in">
@@ -500,15 +462,15 @@ export default function AbsenPage() {
               <form onSubmit={handleIzinSubmit} className="space-y-4">
                 <div>
                   <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-2">Jenis Pengajuan</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {['izin', 'sakit'].map((t) => (
+                  <div className="grid grid-cols-3 gap-2">
+                    {['izin', 'sakit', 'lupa_absen'].map((t) => (
                       <button
                         key={t}
                         type="button"
                         onClick={() => setIzinData({...izinData, jenis: t})}
-                        className={`py-3 rounded-xl border text-sm font-bold capitalize transition-all ${izinData.jenis === t ? 'bg-slate-900 border-slate-900 text-white' : 'border-slate-200 text-slate-400'}`}
+                        className={`py-3 rounded-xl border text-xs font-bold capitalize transition-all ${izinData.jenis === t ? 'bg-slate-900 border-slate-900 text-white' : 'border-slate-200 text-slate-400'}`}
                       >
-                        {t}
+                        {t.replace('_', ' ')}
                       </button>
                     ))}
                   </div>
@@ -559,6 +521,40 @@ export default function AbsenPage() {
               </form>
             </div>
           </div>
+        </div>
+      )}
+      {/* SUCCESS MODAL PREMIUM */}
+      {isSuccessModalOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-300">
+           <div className="bg-white w-full max-w-sm rounded-[40px] p-10 text-center shadow-2xl animate-in zoom-in duration-300 relative overflow-hidden">
+              {/* Decorative background element */}
+              <div className="absolute -top-24 -right-24 w-48 h-48 bg-emerald-50/50 rounded-full blur-3xl"></div>
+              
+              <div className={`w-20 h-20 mx-auto mb-8 rounded-3xl flex items-center justify-center ${waktuAbsen === 'Terkirim' ? 'bg-blue-50 text-blue-500' : 'bg-emerald-50 text-emerald-500'} shadow-inner`}>
+                 {waktuAbsen === 'Terkirim' ? <Send size={32} /> : <CheckCircle2 size={32} />}
+              </div>
+
+              <h2 className="text-2xl font-black text-slate-900 mb-2">
+                 {waktuAbsen === 'Terkirim' ? 'Berhasil Terkirim!' : 'Presensi Berhasil!'}
+              </h2>
+              <p className="text-slate-400 text-sm font-medium mb-8 leading-relaxed">{successMsg}</p>
+
+              <div className="bg-slate-50 rounded-3xl p-6 mb-8 border border-slate-100/50">
+                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">
+                    {waktuAbsen === 'Terkirim' ? 'Status' : 'Waktu Absensi'}
+                 </p>
+                 <p className="text-2xl font-black text-slate-900 tracking-tight">
+                    {waktuAbsen === 'Terkirim' ? 'Menunggu Verifikasi' : waktuAbsen}
+                 </p>
+              </div>
+
+              <button 
+                onClick={() => setIsSuccessModalOpen(false)}
+                className="w-full bg-slate-900 text-white font-black py-4 rounded-2xl hover:bg-black transition-all active:scale-95 shadow-xl shadow-slate-200"
+              >
+                Tutup
+              </button>
+           </div>
         </div>
       )}
 

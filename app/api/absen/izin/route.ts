@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
     const adminClient = createAdminClient();
     const serverNow = new Date();
     const targetTanggal = tanggal || new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'Asia/Jakarta',
+      timeZone: 'Asia/Makassar',
     }).format(serverNow);
 
     // Upload bukti jika ada

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { Eye, Edit, Trash2, Users, UserCheck, Clock, X } from 'lucide-react';
+import { Eye, Edit, Trash2, Users, UserCheck, Clock, X, Star } from 'lucide-react';
 import ConfirmModal from '@/components/ConfirmModal';
 
 type UserData = {
@@ -10,6 +10,7 @@ type UserData = {
   name: string;
   role: string;
   status: string;
+  points: number;
   created_at: string;
 };
 
@@ -182,6 +183,7 @@ export default function AdminUsersPage() {
               <tr>
                 <th className="px-5 py-4">Nama Lengkap</th>
                 <th className="px-5 py-4">Role</th>
+                <th className="px-5 py-4">Poin</th>
                 <th className="px-5 py-4">Status</th>
                 <th className="px-5 py-4 text-center">Aksi</th>
               </tr>
@@ -213,6 +215,12 @@ export default function AdminUsersPage() {
                       <span className={`px-2.5 py-1 rounded text-xs font-semibold ${user.role === 'admin' ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-700'}`}>
                         {user.role}
                       </span>
+                    </td>
+                    <td className="px-5 py-3">
+                      <div className="flex items-center gap-1.5 font-black text-slate-700">
+                        <Star size={14} className="text-amber-500 fill-amber-500" />
+                        {user.points || 0}
+                      </div>
                     </td>
                     <td className="px-5 py-3">
                       {user.status === 'pending' && <span className="bg-amber-100 text-amber-700 px-2.5 py-1 rounded-full text-xs font-semibold inline-flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>Pending</span>}
@@ -347,6 +355,19 @@ export default function AdminUsersPage() {
                     )}
                  </div>
               </div>
+
+              {/* Points Display in Modal */}
+              {!editMode && selectedUser && (
+                 <div className="bg-amber-50 border border-amber-100 rounded-[24px] p-5 flex items-center justify-between shadow-sm">
+                    <div>
+                       <p className="text-[10px] font-black text-amber-700 uppercase tracking-[0.2em] mb-1">Total Perolehan Poin</p>
+                       <p className="text-3xl font-black text-amber-900 leading-none">{selectedUser.points || 0}</p>
+                    </div>
+                    <div className="w-12 h-12 bg-amber-500 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-amber-200">
+                       <Star size={24} className="fill-white" />
+                    </div>
+                 </div>
+              )}
 
             </div>
 

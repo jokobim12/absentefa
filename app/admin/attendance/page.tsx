@@ -22,6 +22,7 @@ export default function AdminAttendancePage() {
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [processingId, setProcessingId] = useState<string | null>(null);
+  const [customPointsMap, setCustomPointsMap] = useState<Record<string, number>>({});
 
   useEffect(() => {
     fetchRecords();
@@ -48,7 +49,11 @@ export default function AdminAttendancePage() {
       const res = await fetch('/api/admin/attendance', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, action }),
+        body: JSON.stringify({ 
+          id, 
+          action, 
+          customPoints: action === 'approve' ? (customPointsMap[id] ?? -3) : -5 
+        }),
       });
 
       if (res.ok) {
@@ -130,22 +135,41 @@ export default function AdminAttendancePage() {
                 </a>
               )}
 
-              {/* Actions */}
-              <div className="flex gap-2 w-full md:w-auto shrink-0">
-                <button
-                  disabled={processingId === record.id}
-                  onClick={() => handleAction(record.id, 'reject')}
-                  className="flex-1 md:flex-none px-6 py-3 rounded-xl border border-rose-100 text-rose-500 font-bold text-sm hover:bg-rose-50 transition-all flex items-center justify-center gap-2"
-                >
-                  <X size={18} /> Tolak
-                </button>
-                <button
-                  disabled={processingId === record.id}
-                  onClick={() => handleAction(record.id, 'approve')}
-                  className="flex-1 md:flex-none px-6 py-3 rounded-xl bg-emerald-500 text-white font-bold text-sm hover:bg-emerald-600 transition-all shadow-lg shadow-emerald-100 flex items-center justify-center gap-2"
-                >
-                  {processingId === record.id ? <RefreshCw className="animate-spin" size={18} /> : <><Check size={18} /> Setujui</>}
-                </button>
+              {/* Actions & Point Adjustment */}
+              <div className="flex flex-col md:flex-row gap-4 w-full md:w-auto shrink-0 items-end md:items-center">
+                 
+                 {/* Point Selector (Only for Approve) */}
+                 <div className="flex flex-col gap-1 w-full md:w-32">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Penyesuaian Poin</label>
+                    <select 
+                      value={customPointsMap[record.id] ?? -3}
+                      onChange={(e) => setCustomPointsMap({...customPointsMap, [record.id]: parseInt(e.target.value)})}
+                      className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-2 text-xs font-bold text-slate-700 focus:ring-2 ring-slate-900 outline-none cursor-pointer"
+                    >
+                       <option value="0">0 (Lupa Absen)</option>
+                       <option value="-1">-1 (Setengah Hari)</option>
+                       <option value="-2">-2 Poin</option>
+                       <option value="-3">-3 (Izin Standar)</option>
+                       <option value="-5">-5 (Berat)</option>
+                    </select>
+                 </div>
+
+                 <div className="flex gap-2 w-full md:w-auto">
+                   <button
+                     disabled={processingId === record.id}
+                     onClick={() => handleAction(record.id, 'reject')}
+                     className="flex-1 md:flex-none px-6 py-3 rounded-xl border border-rose-100 text-rose-500 font-bold text-sm hover:bg-rose-50 transition-all flex items-center justify-center gap-2"
+                   >
+                     <X size={18} /> Tolak
+                   </button>
+                   <button
+                     disabled={processingId === record.id}
+                     onClick={() => handleAction(record.id, 'approve')}
+                     className="flex-1 md:flex-none px-6 py-3 rounded-xl bg-emerald-500 text-white font-bold text-sm hover:bg-emerald-600 transition-all shadow-lg shadow-emerald-100 flex items-center justify-center gap-2"
+                   >
+                     {processingId === record.id ? <RefreshCw className="animate-spin" size={18} /> : <><Check size={18} /> Setujui</>}
+                   </button>
+                 </div>
               </div>
             </div>
           ))}

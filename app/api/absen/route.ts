@@ -54,9 +54,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Token sudah expired, scan ulang QR' }, { status: 400 });
     }
 
-    // 6. Cek status absensi hari ini (Gunakan WIB / Asia/Jakarta)
-    const todayWIB = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'Asia/Jakarta',
+    // 6. Cek status absensi hari ini (Gunakan WITA / Asia/Makassar)
+    const todayWITA = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Makassar',
     }).format(serverNow); // format: YYYY-MM-DD
 
     // 6a. Tentukan jenis absensi (jika tidak dikirim, auto-detect)
@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
       .from('attendance')
       .select('jenis')
       .eq('user_id', user.id)
-      .eq('tanggal', todayWIB);
+      .eq('tanggal', todayWITA);
 
     const hasMasuk = attendanceToday?.some(a => a.jenis === 'masuk');
     const hasPulang = attendanceToday?.some(a => a.jenis === 'pulang');
@@ -88,28 +88,34 @@ export async function POST(request: NextRequest) {
     }
 
     // 6c. Logika Poin & Status
-    const formatter = new Intl.DateTimeFormat('id-ID', {
+    const hourFormatter = new Intl.DateTimeFormat('id-ID', {
       hour: 'numeric',
       hour12: false,
-      timeZone: 'Asia/Jakarta',
+      timeZone: 'Asia/Makassar',
     });
-    const currentHourWIB = parseInt(formatter.format(serverNow));
+    const minuteFormatter = new Intl.DateTimeFormat('id-ID', {
+      minute: 'numeric',
+      timeZone: 'Asia/Makassar',
+    });
+    const currentHourWITA = parseInt(hourFormatter.format(serverNow));
+    const currentMinuteWITA = parseInt(minuteFormatter.format(serverNow));
     
     let attendanceStatus = 'hadir';
     let pointsChange = 0;
 
     if (finalJenis === 'masuk') {
-      if (currentHourWIB >= 10) {
+      // Terlambat jika lewat jam 08:00
+      if (currentHourWITA > 8 || (currentHourWITA === 8 && currentMinuteWITA > 0)) {
         attendanceStatus = 'terlambat';
         pointsChange = -1;
       }
     } else if (finalJenis === 'pulang') {
-      if (currentHourWIB < 16) {
+      if (currentHourWITA < 16) {
         attendanceStatus = 'pulang_cepat';
-        pointsChange = 0; // Tidak ngurang tapi tidak nambah
-      } else if (currentHourWIB >= 17) {
+        pointsChange = 0; 
+      } else if (currentHourWITA >= 17) {
         // Lembur: +5 poin per jam setelah jam 16:00
-        const overtimeHours = currentHourWIB - 16;
+        const overtimeHours = currentHourWITA - 16;
         pointsChange = overtimeHours * 5;
       }
     }
@@ -152,7 +158,7 @@ export async function POST(request: NextRequest) {
           
           const buffer = Buffer.from(base64Data, 'base64');
           if (buffer.length > 0) {
-            const fileName = `${user.id}/${todayWIB}_${Date.now()}.jpg`;
+            const fileName = `${user.id}/${todayWITA}_${Date.now()}.jpg`;
 
             const { data: uploadData, error: uploadError } = await adminClient.storage
               .from('attendance-photos')
@@ -185,7 +191,7 @@ export async function POST(request: NextRequest) {
       .insert({
         user_id: user.id,
         waktu_absen: serverNow.toISOString(),
-        tanggal: todayWIB,
+        tanggal: todayWITA,
         jenis: finalJenis,
         lat: lat ?? null,
         long: long ?? null,
@@ -226,6 +232,7 @@ export async function POST(request: NextRequest) {
       status: attendance.status,
       waktu_absen: attendance.waktu_absen,
       tanggal: attendance.tanggal,
+      id: attendance.id,
     });
   } catch (err) {
     console.error('[absen] Unexpected error:', err);

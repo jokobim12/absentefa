@@ -40,7 +40,7 @@ export async function PATCH(request: NextRequest) {
 
     if (!adminUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const { id, action } = await request.json(); // action: 'approve' | 'reject'
+    const { id, action, customPoints } = await request.json(); // action: 'approve' | 'reject', customPoints: number
     if (!id || !action) return NextResponse.json({ error: 'Missing ID or action' }, { status: 400 });
 
     const adminClient = createAdminClient();
@@ -55,13 +55,16 @@ export async function PATCH(request: NextRequest) {
     if (getError || !attendance) return NextResponse.json({ error: 'Data not found' }, { status: 404 });
     if (attendance.approval_status !== 'pending') return NextResponse.json({ error: 'Already processed' }, { status: 400 });
 
-    // 2. Tentukan pengurangan poin berdasarkan peraturan
-    // Izin diterima: -3, Ditolak: -5
+    // 2. Tentukan pengurangan poin berdasarkan peraturan atau input custom
     let finalPointsChange = 0;
     const finalStatus = action === 'approve' ? 'approved' : 'rejected';
 
-    if (attendance.jenis === 'izin' || attendance.jenis === 'sakit') {
-       finalPointsChange = action === 'approve' ? -3 : -5;
+    if (customPoints !== undefined) {
+       finalPointsChange = parseInt(customPoints);
+    } else {
+       if (attendance.jenis === 'izin' || attendance.jenis === 'sakit') {
+          finalPointsChange = action === 'approve' ? -3 : -5;
+       }
     }
 
     // 3. Update Record

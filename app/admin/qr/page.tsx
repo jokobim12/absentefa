@@ -111,7 +111,7 @@ export default function AdminQRPage() {
            </div>
            <div>
               <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest leading-none mb-1">Waktu Sistem</p>
-              <p className="text-xl font-mono font-bold text-slate-900">{currentTime} <span className="text-sm font-medium text-slate-400 ml-1">WIB</span></p>
+              <p className="text-xl font-mono font-bold text-slate-900">{currentTime} <span className="text-sm font-medium text-slate-400 ml-1">WITA</span></p>
            </div>
         </div>
       </div>
