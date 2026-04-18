@@ -16,6 +16,7 @@ import {
   History
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import type { LabeledFaceDescriptors } from '@vladmandic/face-api';
 
 export default function AdminFaceAttendance() {
   const supabase = createClient();
@@ -94,7 +95,7 @@ export default function AdminFaceAttendance() {
         user.id, // Keep ID as label for internal matching
         [descriptor]
       );
-    }).filter(Boolean) as faceapi.LabeledFaceDescriptors[];
+    }).filter(Boolean) as LabeledFaceDescriptors[];
 
     console.log(`Loaded ${labeled.length} labeled descriptors for matcher`);
     
