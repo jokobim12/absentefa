@@ -50,7 +50,9 @@ export default function AdminUsersPage() {
     if (!error && data) {
       const formattedData = data.map((u: any) => ({
         ...u,
-        face_registered: u.user_faces && u.user_faces.length > 0
+        face_registered: Array.isArray(u.user_faces) 
+          ? u.user_faces.length > 0 
+          : !!u.user_faces
       }));
       setUsers(formattedData);
     }

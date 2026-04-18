@@ -21,10 +21,12 @@ export default function AdminFaceAttendance() {
   const supabase = createClient();
   const router = useRouter();
   const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const [loading, setLoading] = useState(true);
   const [faceapi, setFaceapi] = useState<any>(null);
   const [modelsLoaded, setModelsLoaded] = useState(false);
   const [labeledDescriptors, setLabeledDescriptors] = useState<any[]>([]);
+  const [userMap, setUserMap] = useState<Record<string, string>>({});
   const [lastMatchedUser, setLastMatchedUser] = useState<any>(null);
   const [showSuccess, setShowSuccess] = useState(false);
   const [message, setMessage] = useState('Menginisialisasi Sistem Bio-Scanner...');
@@ -56,10 +58,10 @@ export default function AdminFaceAttendance() {
       
       setModelsLoaded(true);
       setMessage('Mengambil Data Pegawai...');
-      await loadEmployeeDescriptors();
+      await loadEmployeeDescriptors(fa);
       
       setMessage('Membuka Kamera...');
-      await startCamera();
+      await startCamera(fa);
       
       setLoading(false);
     } catch (err) {
@@ -68,7 +70,7 @@ export default function AdminFaceAttendance() {
     }
   };
 
-  const loadEmployeeDescriptors = async () => {
+  const loadEmployeeDescriptors = async (fa: any) => {
     const { data: faces, error } = await supabase
       .from('user_faces')
       .select('descriptor, users(id, name)');
@@ -82,16 +84,30 @@ export default function AdminFaceAttendance() {
     const labeled = faces.map(f => {
       const descriptor = new Float32Array(f.descriptor);
       const user = f.users as any;
-      return new faceapi.LabeledFaceDescriptors(
-        user.id,
+      
+      if (!user) {
+        console.error('Data user tidak ditemukan untuk descriptor ini:', f);
+        return null;
+      }
+
+      return new fa.LabeledFaceDescriptors(
+        user.id, // Keep ID as label for internal matching
         [descriptor]
       );
-    });
+    }).filter(Boolean) as faceapi.LabeledFaceDescriptors[];
 
+    console.log(`Loaded ${labeled.length} labeled descriptors for matcher`);
+    
+    // Create a map for instant name lookup in the loop
+    const mapping: Record<string, string> = {};
+    faces.forEach((f: any) => {
+      if (f.users) mapping[f.users.id] = f.users.name;
+    });
+    setUserMap(mapping);
     setLabeledDescriptors(labeled);
   };
 
-  const startCamera = async () => {
+  const startCamera = async (fa: any) => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
         video: { 
@@ -120,24 +136,96 @@ export default function AdminFaceAttendance() {
   };
 
   const startRecognition = async () => {
-    if (!videoRef.current || labeledDescriptors.length === 0 || !faceapi) return;
+    if (!videoRef.current || !canvasRef.current || labeledDescriptors.length === 0 || !faceapi) return;
 
-    const faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.6);
+    const faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.65);
+    const canvas = canvasRef.current;
+    
+    // Hidden canvas for image enhancement
+    const hiddenCanvas = document.createElement('canvas');
+    const hctx = hiddenCanvas.getContext('2d');
 
     const recognize = async () => {
-      if (!videoRef.current || !faceapi) return;
+      if (!videoRef.current || !canvas || !faceapi) return;
 
+      const video = videoRef.current;
+      const displaySize = { width: video.videoWidth, height: video.videoHeight };
+      
+      if (displaySize.width === 0) {
+        requestAnimationFrame(recognize);
+        return;
+      }
+
+      // SYNC Canvas size with actual video size (CRITICAL FIX)
+      if (canvas.width !== displaySize.width) {
+        canvas.width = displaySize.width;
+        canvas.height = displaySize.height;
+      }
+
+      // High-Accuracy Face Detection (SSD Mobilenet) - Better for Backlight
       const detection = await faceapi
-        .detectSingleFace(videoRef.current, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.4 }))
+        .detectSingleFace(video, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.3 }))
         .withFaceLandmarks()
         .withFaceDescriptor();
 
-      if (detection && !isProcessing) {
-        console.log('Match attempt with confidence:', detection.score);
-        const bestMatch = faceMatcher.findBestMatch(detection.descriptor);
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
         
-        if (bestMatch.label !== 'unknown') {
-          handleFaceMatch(bestMatch.label);
+        // Draw Radar Heartbeat (So user knows system is alive)
+        if (!detection && !isProcessing) {
+           const time = Date.now() / 1000;
+           const pulse = Math.sin(time * 3) * 0.5 + 0.5;
+           ctx.strokeStyle = `rgba(14, 165, 233, ${0.1 + pulse * 0.2})`;
+           ctx.lineWidth = 1;
+           ctx.beginPath();
+           ctx.arc(canvas.width/2, canvas.height/2, 100 + pulse * 20, 0, Math.PI * 2);
+           ctx.stroke();
+        }
+
+        if (detection) {
+          const resized = faceapi.resizeResults(detection, displaySize);
+          const box = resized.detection.box;
+
+          // Draw Tracking Box - Cyan/Sky Theme
+          ctx.strokeStyle = '#0ea5e9';
+          ctx.lineWidth = 4;
+          ctx.strokeRect(box.x, box.y, box.width, box.height);
+          
+          // Identity Text Background
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+          ctx.fillRect(box.x, box.y - 45, box.width, 40);
+          
+          if (!isProcessing) {
+             const bestMatch = faceMatcher.findBestMatch(detection.descriptor);
+             console.log('Match Detail:', bestMatch.toString());
+
+             if (bestMatch.label !== 'unknown') {
+               const userName = userMap[bestMatch.label] || 'Recognized';
+               const confidence = Math.round((1 - bestMatch.distance) * 100);
+               
+               ctx.fillStyle = '#10b981'; // Emerald
+               ctx.font = 'bold 14px sans-serif';
+               ctx.fillText(userName, box.x + 10, box.y - 25);
+               ctx.font = 'bold 10px sans-serif';
+               ctx.fillText(`MATCH CONFIDENCE: ${confidence}%`, box.x + 10, box.y - 12);
+               
+               // Trigger on high stability
+               if (bestMatch.distance < 0.6) {
+                 handleFaceMatch(bestMatch.label);
+               }
+             } else {
+               ctx.fillStyle = '#f8fafc';
+               ctx.font = 'bold 10px sans-serif';
+               ctx.fillText('MENGANALISI BIOMETRIK...', box.x + 10, box.y - 25);
+               ctx.fillStyle = 'rgba(255,255,255,0.3)';
+               ctx.fillRect(box.x + 10, box.y - 15, box.width - 20, 4);
+             }
+          } else {
+             ctx.fillStyle = '#10b981';
+             ctx.font = 'bold 14px sans-serif';
+             ctx.fillText('MENYIMPAN KEHADIRAN...', box.x + 10, box.y - 20);
+          }
         }
       }
 
@@ -206,7 +294,7 @@ export default function AdminFaceAttendance() {
               <ChevronLeft size={24} />
             </button>
             <div className="hidden md:block">
-               <h1 className="text-white font-black text-xs uppercase tracking-[0.3em]">Corporate Face-ID</h1>
+               <h1 className="text-white font-black text-xs uppercase tracking-[0.3em] ">Corporate Face-ID</h1>
                <p className="text-sky-400 text-[10px] font-bold uppercase tracking-widest mt-0.5">Automated Attendance Terminal</p>
             </div>
          </div>
@@ -245,6 +333,10 @@ export default function AdminFaceAttendance() {
                    muted 
                    playsInline
                  />
+                 <canvas 
+                    ref={canvasRef}
+                    className="absolute inset-0 w-full h-full object-cover scale-x-[-1] z-20"
+                  />
                  
                  {/* SCANNER OVERLAY */}
                  <div className="absolute inset-0 pointer-events-none flex items-center justify-center">

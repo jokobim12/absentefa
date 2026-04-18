@@ -39,7 +39,7 @@ export default function FaceRegistration({ targetUserId, onSuccess, onCancel }: 
 
       const MODEL_URL = '/models';
       await Promise.all([
-        fa.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
+        fa.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
         fa.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
         fa.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
       ]);
@@ -104,7 +104,7 @@ export default function FaceRegistration({ targetUserId, onSuccess, onCancel }: 
 
       try {
         const detection = await faceapi
-          .detectSingleFace(videoRef.current, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.3 }))
+          .detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.3 }))
           .withFaceLandmarks()
           .withFaceDescriptor();
 
@@ -113,14 +113,12 @@ export default function FaceRegistration({ targetUserId, onSuccess, onCancel }: 
           const videoWidth = videoRef.current.videoWidth || 640;
           const ratio = faceSize / videoWidth;
 
-          if (ratio < 0.2) {
+          if (ratio < 0.15) {
             setGuidance('Dekatkan wajah Anda ke kamera');
-          } else if (detection.score < 0.4) {
-            setGuidance('Pencahayaan kurang optimal');
           } else {
             setGuidance('Siap! Tahan sebentar...');
-            // Auto-lock if everything is perfect
-            if (detection.score > 0.6 && ratio > 0.3) {
+            // Auto-lock if everything is decent
+            if (detection.score > 0.4) {
               handleCapture(Array.from(detection.descriptor));
               return;
             }
@@ -146,12 +144,12 @@ export default function FaceRegistration({ targetUserId, onSuccess, onCancel }: 
   };
 
   const manualCapture = async () => {
-    if (!videoRef.current || !faceapi || status !== 'detecting') return;
+    if (!videoRef.current || !faceapi) return;
     
     setGuidance('Memproses tangkapan manual...');
     try {
       const detection = await faceapi
-        .detectSingleFace(videoRef.current, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.2 }))
+        .detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.1 }))
         .withFaceLandmarks()
         .withFaceDescriptor();
 

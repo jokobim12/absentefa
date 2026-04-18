@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
+import { createClient as createAdminClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 
 export async function POST(req: Request) {
@@ -28,14 +29,25 @@ export async function POST(req: Request) {
     // Determine whose face we're registering
     const finalUserId = (isAdmin && targetUserId) ? targetUserId : user.id;
 
-    const { error } = await supabase
+    // Use admin client if we are an admin registering for another user to bypass RLS
+    const dbClient = (isAdmin && finalUserId !== user.id)
+      ? createAdminClient(
+          process.env.NEXT_PUBLIC_SUPABASE_URL!,
+          process.env.SUPABASE_SERVICE_ROLE_KEY!
+        )
+      : supabase;
+
+    const { error } = await dbClient
       .from('user_faces')
       .upsert({
         user_id: finalUserId,
         descriptor: descriptor,
-      });
+      }, { onConflict: 'user_id' });
 
-    if (error) throw error;
+    if (error) {
+      console.error('Supabase Error:', error);
+      throw error;
+    }
 
     return NextResponse.json({ success: true });
   } catch (error: any) {
