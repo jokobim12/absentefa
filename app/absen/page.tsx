@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Camera, QrCode, X, CheckCircle2, AlertCircle, RefreshCw, Trophy, LogOut, ChevronRight, User, MousePointer2, FileText, Send, Star, Clock } from 'lucide-react';
+import { Camera, QrCode, X, CheckCircle2, AlertCircle, RefreshCw, Trophy, LogOut, ChevronRight, User, MousePointer2, FileText, Send, Coins, Clock, Calendar } from 'lucide-react';
 import ConfirmModal from '@/components/ConfirmModal';
 
 type ScanState = 'idle' | 'takingSelfie' | 'scanning' | 'submitting' | 'success' | 'error';
@@ -16,6 +16,7 @@ export default function AbsenPage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
+  const [isLoading, setIsLoading] = useState(true);
   const [scanState, setScanState] = useState<ScanState>('idle');
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
@@ -26,40 +27,51 @@ export default function AbsenPage() {
   const [waktuAbsen, setWaktuAbsen] = useState('');
   const [absenStatus, setAbsenStatus] = useState<'hadir' | 'terlambat' | 'pulang_cepat' | ''>('');
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
-  const [userPoints, setUserPoints] = useState(0);
+  const [userPoints, setUserPoints] = useState<number | null>(null);
   const [currentJenis, setCurrentJenis] = useState<'masuk' | 'pulang'>('masuk');
   const [isIzinModalOpen, setIsIzinModalOpen] = useState(false);
   const [izinData, setIzinData] = useState({ jenis: 'izin', keterangan: '', foto: '' });
   const [izinPreview, setIzinPreview] = useState<string | null>(null);
   const [attendanceStatus, setAttendanceStatus] = useState<string | null>(null);
   const [lastAttendanceId, setLastAttendanceId] = useState<string | null>(null);
+  const [isDoneToday, setIsDoneToday] = useState(false);
   const [isSubmittingIzin, setIsSubmittingIzin] = useState(false);
   const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false);
 
   // Get current user info & daily status
   useEffect(() => {
     async function fetchData() {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { router.push('/login'); return; }
-      
-      const { data: profile } = await supabase.from('users').select('name, avatar_url, points').eq('id', user.id).single();
-      setUserName(profile?.name || user.email || '');
-      setAvatarUrl(profile?.avatar_url || '');
-      setUserPoints(profile?.points || 0);
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) { router.push('/login'); return; }
+        
+        const { data: profile } = await supabase.from('users').select('name, avatar_url, points').eq('id', user.id).single();
+        setUserName(profile?.name || user.email || '');
+        setAvatarUrl(profile?.avatar_url || '');
+        setUserPoints(profile?.points || 0);
 
-      const todayWITA = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Makassar' }).format(new Date());
-      
-      const { data: attendanceToday } = await supabase
-        .from('attendance')
-        .select('jenis')
-        .eq('user_id', user.id)
-        .eq('tanggal', todayWITA);
+        const todayWITA = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Makassar' }).format(new Date());
+        
+        const { data: attendanceToday } = await supabase
+          .from('attendance')
+          .select('id, jenis, approval_status')
+          .eq('user_id', user.id)
+          .eq('tanggal', todayWITA)
+          .in('approval_status', ['approved', 'dispute_approved', 'pending']);
 
-      const hasMasuk = attendanceToday?.some(a => a.jenis === 'masuk');
-      setCurrentJenis(hasMasuk ? 'pulang' : 'masuk');
+        const hasMasuk = attendanceToday?.some(a => a.jenis === 'masuk' && a.approval_status !== 'rejected');
+        const hasPulang = attendanceToday?.some(a => a.jenis === 'pulang' && a.approval_status !== 'rejected');
+        
+        setCurrentJenis(hasMasuk ? 'pulang' : 'masuk');
+        setIsDoneToday(!!(hasMasuk && hasPulang));
+      } catch (error) {
+        console.error("Error fetching data:", error);
+      } finally {
+        setIsLoading(false);
+      }
     }
     fetchData();
-  }, [isSuccessModalOpen]); // Refresh points when success modal is closed
+  }, [isSuccessModalOpen, router, supabase]);
 
   // Cleanup cameras on lifecycle end
   useEffect(() => {
@@ -281,158 +293,232 @@ export default function AbsenPage() {
     </div>
   );
 
-  return (
-    <main className="min-h-screen bg-slate-50 flex flex-col font-sans">
-      {/* Refined Nav Header */}
-      <nav className="shrink-0 bg-white border-b border-slate-200 sticky top-0 z-30 px-6 py-4">
-        <div className="max-w-xl mx-auto flex items-center justify-between">
-           <Link href="/profile" className="flex items-center gap-3 active:opacity-70 transition-opacity min-w-0">
-             <div className="w-10 h-10 rounded-xl border border-slate-100 overflow-hidden bg-slate-50 flex items-center justify-center shrink-0">
-               {avatarUrl ? <img src={avatarUrl} className="w-full h-full object-cover" /> : <User size={20} className="text-slate-300" />}
-             </div>
-             <div className="min-w-0">
-               <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest leading-none mb-1">Akun Saya</p>
-               <p className="text-sm font-bold text-slate-900 leading-none truncate">{userName || 'Loading...'}</p>
-             </div>
-           </Link>
+  if (isLoading) {
+    return (
+      <main className="min-h-screen bg-slate-50 font-sans pb-10 flex flex-col">
+        {/* Header Skeleton */}
+        <div className="bg-sky-500 pt-10 pb-20 px-6 relative overflow-hidden">
+          <div className="max-w-xl mx-auto flex items-center justify-between relative z-10">
+            <div className="flex items-center gap-4">
+               <div className="w-14 h-14 rounded-xl skeleton bg-white/20" />
+               <div className="space-y-2">
+                 <div className="w-20 h-2 skeleton bg-white/20" />
+                 <div className="w-32 h-4 skeleton bg-white/20" />
+               </div>
+            </div>
             <div className="flex gap-2">
-              <Link href="/points" className="flex items-center gap-2 px-3 py-1.5 bg-amber-50 rounded-xl border border-amber-100 hover:bg-amber-100 transition-colors">
-                <Star size={14} className="text-amber-500 fill-amber-500" />
-                <span className="text-xs font-black text-amber-700">{userPoints}</span>
-              </Link>
-              <Link href="/leaderboard" className="w-10 h-10 border border-slate-200 rounded-xl flex items-center justify-center text-slate-400 hover:text-slate-900 hover:bg-slate-50 transition-all">
-                <Trophy size={18} />
-              </Link>
-              <button onClick={() => setIsLogoutModalOpen(true)} className="w-10 h-10 border border-slate-200 rounded-xl flex items-center justify-center text-rose-400 hover:text-rose-600 hover:bg-rose-50 transition-all">
-                <LogOut size={18} />
-              </button>
+               <div className="w-16 h-10 rounded-lg skeleton bg-white/20" />
+               <div className="w-10 h-10 rounded-lg skeleton bg-white/20" />
             </div>
+          </div>
         </div>
-      </nav>
 
-      <div className="flex-1 p-6 flex flex-col items-center justify-center">
-        <div className="w-full max-w-sm">
-          
-          {/* STEP 0: IDLE */}
-          {scanState === 'idle' && (
-            <div className="bg-white rounded-[32px] p-10 border border-slate-200 shadow-sm text-center animate-in fade-in zoom-in duration-500">
-              <div className="w-16 h-16 bg-slate-900 text-white rounded-2xl flex items-center justify-center mx-auto mb-8 shadow-lg shadow-slate-200">
-                 <QrCode size={32} />
-              </div>
-              <h1 className="text-2xl font-black text-slate-900 mb-2 tracking-tight">Presensi TEFA</h1>
-              <p className="text-slate-400 text-sm mb-10 leading-relaxed">Pastikan Anda berada di lingkungan kantor sebelum memulai presensi.</p>
-
-              <div className="bg-slate-50 border border-slate-100 rounded-2xl p-6 mb-10 text-left relative overflow-hidden">
-                  <div className="absolute top-0 right-0 w-16 h-16 bg-white/50 rounded-bl-full"></div>
-                  <p className="text-[11px] font-black text-slate-900 uppercase tracking-widest mb-2 flex items-center gap-2">
-                    <CheckCircle2 size={12} className="text-emerald-500" /> Wajib Verifikasi
-                  </p>
-                  <p className="text-xs text-slate-500 font-medium leading-relaxed">
-                    Sistem memerlukan akses <span className="font-bold text-slate-800">Kamera</span> untuk Selfie & Scan QR, serta <span className="font-bold text-slate-800">GPS</span> untuk lokasi.
-                  </p>
-              </div>
-
-              <div className="flex flex-col gap-3">
-                <button onClick={startAttendanceProcess} className={`w-full ${currentJenis === 'masuk' ? 'bg-slate-900 hover:bg-black' : 'bg-blue-600 hover:bg-blue-700'} text-white font-bold py-5 rounded-2xl transition-all active:scale-95 flex items-center justify-center gap-3 text-base shadow-xl shadow-slate-200`}>
-                  Absen {currentJenis === 'masuk' ? 'Masuk' : 'Pulang'} <ChevronRight size={20} />
-                </button>
-                <div className="grid grid-cols-2 gap-3">
-                  <button onClick={() => setIsIzinModalOpen(true)} className="bg-white border border-slate-200 text-slate-600 font-bold py-4 rounded-2xl hover:bg-slate-50 transition-all flex items-center justify-center gap-2 text-sm">
-                    <FileText size={18} /> Izin / Sakit
-                  </button>
-                  <Link href="/leaderboard" className="bg-white border border-slate-200 text-slate-600 font-bold py-4 rounded-2xl hover:bg-slate-50 transition-all flex items-center justify-center gap-2 text-sm">
-                    <Trophy size={18} /> Peringkat
-                  </Link>
-                </div>
-              </div>
+        <div className="flex-1 -mt-10 px-6 relative z-10">
+          <div className="max-w-xl mx-auto">
+            {/* Main Card Skeleton */}
+            <div className="bg-white rounded-xl border border-slate-200 p-8 mb-6">
+               <div className="flex items-center justify-between mb-10">
+                  <div className="space-y-2">
+                    <div className="w-40 h-5 skeleton" />
+                    <div className="w-24 h-3 skeleton opacity-50" />
+                  </div>
+                  <div className="w-10 h-10 rounded-lg skeleton" />
+               </div>
+               <div className="w-full h-48 rounded-2xl skeleton" />
             </div>
-          )}
 
-          {/* STEP 1: TAKING SELFIE */}
-          {scanState === 'takingSelfie' && (
-            <div className="bg-white rounded-[32px] p-8 border border-slate-200 shadow-sm text-center">
-              <StepIndicator current={1} />
-              
-              <div className="mb-6">
-                <h3 className="text-lg font-black text-slate-900 tracking-tight">Verifikasi Wajah</h3>
-                <p className="text-xs text-slate-400 font-medium mt-1">Posisikan wajah Anda di tengah lingkaran</p>
-              </div>
-              
-              <div className="relative rounded-2xl border border-slate-100 overflow-hidden bg-slate-50 mb-8 aspect-[3/4] max-h-[45vh] mx-auto shadow-inner">
-                 <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover scale-x-[-1]" />
-                 <canvas ref={canvasRef} className="hidden" />
-                 
-                 {/* Better Overlay Guide */}
-                 <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="w-48 h-64 rounded-full border-2 border-white/50 border-dashed bg-slate-900/10 backdrop-blur-[1px]"></div>
-                 </div>
-              </div>
-
-              <div className="flex gap-3">
-                 <button onClick={resetAll} className="w-12 h-12 border border-slate-200 rounded-xl flex items-center justify-center text-slate-400 active:bg-slate-50 transition-all">
-                    <X size={20} />
-                 </button>
-                 <button onClick={takeSelfieAndNext} className="flex-1 bg-slate-900 hover:bg-black text-white font-bold py-4 rounded-xl transition-all active:scale-95 flex items-center justify-center gap-2">
-                    <Camera size={18} /> Ambil Foto
-                 </button>
-              </div>
+            {/* Grid Skeleton */}
+            <div className="grid grid-cols-2 gap-4">
+               <div className="h-32 rounded-xl skeleton bg-white border border-slate-100" />
+               <div className="h-32 rounded-xl skeleton bg-white border border-slate-100" />
             </div>
-          )}
+          </div>
+        </div>
+      </main>
+    );
+  }
 
-          {/* STEP 2: SCANNING QR */}
-          {scanState === 'scanning' && (
-             <div className="bg-white rounded-[32px] p-8 border border-slate-200 shadow-sm text-center">
-                <StepIndicator current={2} />
-
-                <div className="mb-6">
-                  <h3 className="text-lg font-black text-slate-900 tracking-tight">Scan QR Office</h3>
-                  <p className="text-xs text-slate-400 font-medium mt-1">Arahkan kamera ke layar Monitor Admin</p>
-                </div>
-
-                <div className="relative rounded-2xl overflow-hidden bg-slate-900 mb-8 aspect-square flex items-center justify-center border border-slate-800">
-                   <div id="qr-reader" className="w-full h-full" />
-                   
-                   {/* Mini Selfie Preview */}
-                   {fotoBase64 && (
-                     <div className="absolute top-4 left-4 w-12 h-16 rounded-lg border-2 border-white/20 shadow-lg overflow-hidden ring-4 ring-black/20">
-                        <img src={fotoBase64} className="w-full h-full object-cover" alt="" />
-                     </div>
-                   )}
-
-                   {/* Scanning animation line */}
-                   <div className="absolute inset-x-8 h-[2px] bg-blue-500/50 blur-[2px] animate-[scan_2s_ease-in-out_infinite]"></div>
-                </div>
-
-                <button onClick={resetAll} className="w-full text-slate-400 font-bold text-xs uppercase tracking-widest py-2 hover:text-slate-900 transition-colors">
-                   Batalkan Proses
-                </button>
+  return (
+    <main className="min-h-screen bg-slate-50 font-sans pb-10 flex flex-col">
+      {/* Sharp App Header - Light Blue Theme */}
+      <div className="bg-sky-500 text-white pt-10 pb-20 px-6 relative overflow-hidden">
+        {/* Decorative subtle pattern */}
+        <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full blur-3xl -mr-20 -mt-20"></div>
+        
+        <div className="max-w-xl mx-auto flex items-center justify-between relative z-10">
+          <Link href="/profile" className="flex items-center gap-4 hover:opacity-80 transition-opacity">
+             <div className="w-14 h-14 rounded-xl border-2 border-white/40 overflow-hidden bg-sky-600">
+               {avatarUrl ? <img src={avatarUrl} className="w-full h-full object-cover" /> : <User size={28} className="text-white/40 mt-3 mx-auto" />}
              </div>
-          )}
+             <div>
+               <p className="text-sky-100 text-[10px] font-black uppercase tracking-widest leading-none mb-1">Selamat Datang,</p>
+               <h1 className="text-xl font-black tracking-tight">{userName.split(' ')[0]}</h1>
+             </div>
+          </Link>
+          <div className="flex gap-2">
+             <Link href="/points" className="flex items-center gap-2 px-3 py-2 bg-white/20 rounded-lg border border-white/20">
+               <Coins size={14} className="text-amber-300 fill-amber-300" />
+               <span className="text-sm font-black text-white">
+                 {userPoints !== null ? userPoints : <div className="w-8 h-4 skeleton bg-white/20" />}
+               </span>
+             </Link>
+             <button onClick={() => setIsLogoutModalOpen(true)} className="w-10 h-10 bg-white/20 border border-white/20 rounded-lg flex items-center justify-center text-white">
+               <LogOut size={18} />
+             </button>
+          </div>
+        </div>
+      </div>
 
-          {/* PROCESS: SUBMITTING */}
-          {scanState === 'submitting' && (
-            <div className="bg-white rounded-[32px] p-12 text-center border border-slate-200 shadow-sm">
-               <div className="w-16 h-16 mx-auto mb-8 flex items-center justify-center">
-                  <RefreshCw className="text-slate-900 animate-spin" size={40} />
-               </div>
-               <h3 className="text-lg font-black text-slate-900 mb-2">Sinkronisasi</h3>
-               <p className="text-slate-400 text-xs font-medium">Memverifikasi lokasi & identitas Anda...</p>
-            </div>
-          )}
+      <div className="flex-1 -mt-10 px-6 relative z-10">
+        <div className="max-w-xl mx-auto">
+          
+          {/* Main Card - No Shadow */}
+          <div className="bg-white rounded-xl border border-slate-200 p-8 mb-6">
+            
+            {scanState === 'idle' && (
+              <div className="animate-in fade-in duration-500">
+                <div className="flex items-center justify-between mb-8">
+                  <div>
+                    <h2 className="text-lg font-black text-slate-900 tracking-tight">Presensi Hari Ini</h2>
+                    <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">{new Date().toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
+                  </div>
+                  <div className="w-10 h-10 bg-slate-50 border border-slate-100 rounded-lg flex items-center justify-center text-slate-400">
+                    <Calendar size={20} />
+                  </div>
+                </div>
 
-          {/* RESULT: ERROR */}
-          {scanState === 'error' && (
-            <div className="bg-white rounded-[32px] p-10 border border-rose-100 shadow-sm text-center animate-in zoom-in">
-               <div className="w-16 h-16 bg-rose-50 text-rose-500 rounded-full flex items-center justify-center mx-auto mb-6">
-                  <AlertCircle size={36} />
-               </div>
-               <h2 className="text-xl font-black text-slate-900 mb-2 tracking-tight">Presensi Gagal</h2>
-               <p className="text-rose-500 text-sm mb-10 font-medium leading-relaxed bg-rose-50/50 p-4 rounded-xl border border-rose-100/50">{errorMsg}</p>
-               <button onClick={resetAll} className="w-full bg-slate-900 text-white font-bold py-4 rounded-2xl transition-all active:scale-95 flex items-center justify-center gap-2">
-                  <RefreshCw size={18} /> Coba Ulangi
-               </button>
-            </div>
-          )}
+                {isDoneToday ? (
+                  <div className="bg-emerald-50 border-2 border-emerald-100 rounded-xl p-8 text-center">
+                    <div className="w-14 h-14 bg-emerald-500 text-white rounded-xl flex items-center justify-center mx-auto mb-4">
+                      <CheckCircle2 size={32} />
+                    </div>
+                    <h3 className="text-base font-black text-emerald-900 uppercase tracking-widest mb-1">Kerja Selesai</h3>
+                    <p className="text-xs text-emerald-600 font-bold leading-relaxed px-4">Terima kasih atas kontribusi Anda hari ini. Sampai jumpa besok!</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4 mb-8">
+                    <div className="flex gap-4">
+                       <div className="flex flex-col items-center">
+                          <div className={`w-6 h-6 rounded-full border-2 ${currentJenis === 'masuk' ? 'border-sky-500 bg-sky-50 animate-pulse' : 'border-emerald-500 bg-emerald-500 text-white'} flex items-center justify-center`}>
+                             {currentJenis === 'pulang' && <CheckCircle2 size={12} />}
+                          </div>
+                          <div className="w-[2px] h-10 bg-slate-100"></div>
+                          <div className={`w-6 h-6 rounded-full border-2 ${currentJenis === 'pulang' ? 'border-orange-500 bg-orange-50 animate-pulse' : 'border-slate-200 bg-slate-50'}`}></div>
+                       </div>
+                       <div className="flex-1 space-y-8 pt-0.5">
+                          <div className="flex justify-between items-start">
+                             <div>
+                               <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Pagi Hari</p>
+                               <p className={`font-bold ${currentJenis === 'pulang' ? 'text-slate-400' : 'text-slate-900'}`}>Absensi Masuk</p>
+                             </div>
+                             {currentJenis === 'pulang' && <span className="text-[10px] font-black text-emerald-600 bg-emerald-50 px-2 py-1 rounded border border-emerald-100">DONE</span>}
+                          </div>
+                          <div className="flex justify-between items-start">
+                             <div>
+                               <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Sore Hari</p>
+                               <p className={`font-bold ${isDoneToday ? 'text-slate-400' : 'text-slate-900'}`}>Absensi Pulang</p>
+                             </div>
+                          </div>
+                       </div>
+                    </div>
+                  </div>
+                )}
+
+                {!isDoneToday && (
+                  <button onClick={startAttendanceProcess} className="w-full bg-sky-500 hover:bg-sky-600 text-white font-black py-5 rounded-lg transition-all active:scale-95 flex items-center justify-center gap-3 text-base">
+                    {currentJenis === 'masuk' ? 'START MASUK' : 'START PULANG'} <ChevronRight size={20} />
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* SCAN STATES - MOBILE STYLE */}
+            {scanState === 'takingSelfie' && (
+              <div className="animate-in fade-in duration-300">
+                <StepIndicator current={1} />
+                <h3 className="text-xl font-black text-slate-900 text-center mb-1">Verifikasi Wajah</h3>
+                <p className="text-xs text-slate-400 text-center mb-8 font-bold uppercase tracking-widest">Posisikan wajah di tengah</p>
+                <div className="relative rounded-xl border-4 border-slate-50 overflow-hidden bg-slate-100 mb-8 aspect-[3/4] max-h-[40vh] mx-auto">
+                   <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover scale-x-[-1]" />
+                   <canvas ref={canvasRef} className="hidden" />
+                   <div className="absolute inset-0 border-[40px] border-slate-900/40 pointer-events-none"></div>
+                </div>
+                <div className="flex gap-4">
+                   <button onClick={resetAll} className="w-14 h-14 border border-slate-200 rounded-lg flex items-center justify-center text-slate-400 active:bg-slate-50">
+                      <X size={24} />
+                   </button>
+                   <button onClick={takeSelfieAndNext} className="flex-1 bg-sky-500 hover:bg-sky-600 text-white font-black py-4 rounded-lg flex items-center justify-center gap-2 active:scale-95 transition-transform">
+                      <Camera size={20} /> AMBIL SELFIE
+                   </button>
+                </div>
+              </div>
+            )}
+
+            {scanState === 'scanning' && (
+              <div className="animate-in fade-in duration-300">
+                 <StepIndicator current={2} />
+                 <h3 className="text-xl font-black text-slate-900 text-center mb-1">Scan QR Office</h3>
+                 <p className="text-xs text-slate-400 text-center mb-8 font-bold uppercase tracking-widest">Arahkan ke monitor admin</p>
+                 <div className="relative rounded-xl overflow-hidden bg-slate-900 mb-8 aspect-square border-4 border-slate-50">
+                    <div id="qr-reader" className="w-full h-full" />
+                    {fotoBase64 && (
+                      <div className="absolute top-4 left-4 w-12 h-16 rounded border-2 border-white/20 overflow-hidden">
+                         <img src={fotoBase64} className="w-full h-full object-cover" />
+                      </div>
+                    )}
+                 </div>
+                 <button onClick={resetAll} className="w-full text-slate-400 font-black text-[10px] uppercase tracking-[0.2em] py-4 border border-transparent hover:border-slate-100 rounded-lg">
+                    BATALKAN PROSES
+                 </button>
+              </div>
+            )}
+
+            {scanState === 'submitting' && (
+              <div className="py-20 text-center">
+                 <RefreshCw className="text-sky-500 animate-spin mx-auto mb-6" size={48} />
+                 <h3 className="text-lg font-black text-slate-900 mb-1">SINGKRONISASI...</h3>
+                 <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Memproses Data Absensi Anda</p>
+              </div>
+            )}
+
+            {scanState === 'error' && (
+              <div className="py-10 text-center">
+                 <div className="w-16 h-16 bg-rose-50 text-rose-500 rounded-xl flex items-center justify-center mx-auto mb-6">
+                    <AlertCircle size={36} />
+                 </div>
+                 <h2 className="text-xl font-black text-slate-900 mb-4 tracking-tight">Presensi Gagal</h2>
+                 <p className="text-rose-600 text-xs font-bold bg-rose-50 p-4 rounded-lg mb-8 border border-rose-100">{errorMsg}</p>
+                 <button onClick={resetAll} className="w-full bg-sky-500 hover:bg-sky-600 text-white font-black py-4 rounded-lg active:scale-95 transition-transform flex items-center justify-center gap-2">
+                    <RefreshCw size={18} /> COBA ULANGI
+                 </button>
+              </div>
+            )}
+
+          </div>
+
+          {/* Quick Actions Grid - No Shadows */}
+          <div className="grid grid-cols-2 gap-4">
+             <button onClick={() => setIsIzinModalOpen(true)} className="bg-white border border-slate-200 p-6 rounded-xl flex flex-col items-center gap-3 transition-all hover:border-sky-200 hover:bg-sky-50/30 active:scale-95">
+                <div className="w-12 h-12 bg-slate-50 text-slate-400 rounded-lg flex items-center justify-center">
+                   <FileText size={24} />
+                </div>
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-900">Izin / Sakit</span>
+             </button>
+             <Link href="/leaderboard" className="bg-white border border-slate-200 p-6 rounded-xl flex flex-col items-center gap-3 transition-all hover:border-sky-200 hover:bg-sky-50/30 active:scale-95">
+                <div className="w-12 h-12 bg-slate-50 text-slate-400 rounded-lg flex items-center justify-center">
+                   <Trophy size={24} />
+                </div>
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-900">Peringkat</span>
+             </Link>
+          </div>
+          
+          <div className="mt-10 pt-10 border-t border-slate-200 text-center">
+             <div className="bg-sky-50 py-4 px-6 rounded-lg border border-sky-100">
+                <p className="text-[9px] font-black text-sky-600 uppercase tracking-[0.2em] leading-relaxed">
+                  Semua data presensi terekam secara otomatis ke dalam sistem monitoring admin TEFA IT Politala.
+                </p>
+             </div>
+          </div>
 
         </div>
       </div>
@@ -442,117 +528,83 @@ export default function AbsenPage() {
         onClose={() => setIsLogoutModalOpen(false)}
         onConfirm={handleLogout}
         variant="warning"
-        title="Logout dari Sesi?"
-        message="Anda akan keluar dari sistem absensi. Harap pastikan tugas Anda sudah terekam."
-        confirmText="Ya, Keluar"
+        title="Logout Akun?"
+        message="Anda akan keluar dari sistem. Sesi Anda akan berakhir seketika."
+        confirmText="YA, KELUAR"
       />
 
-      {/* IZIN MODAL */}
+      {/* IZIN MODAL - NO SHADOW */}
       {isIzinModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
-          <div className="bg-white w-full max-w-sm rounded-[32px] overflow-hidden shadow-2xl border border-white animate-in zoom-in duration-300">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-6 bg-slate-900/40 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white w-full max-w-sm rounded-t-2xl sm:rounded-xl overflow-hidden border border-slate-200 animate-in slide-in-from-bottom duration-300">
             <div className="p-8">
-              <div className="flex justify-between items-center mb-6">
+              <div className="flex justify-between items-center mb-8">
                 <h3 className="text-xl font-black text-slate-900">Form Izin</h3>
-                <button onClick={() => setIsIzinModalOpen(false)} className="w-8 h-8 rounded-full bg-slate-50 flex items-center justify-center text-slate-400">
+                <button onClick={() => setIsIzinModalOpen(false)} className="w-8 h-8 rounded-lg bg-slate-50 text-slate-400 flex items-center justify-center">
                   <X size={18} />
                 </button>
               </div>
-
-              <form onSubmit={handleIzinSubmit} className="space-y-4">
+              <form onSubmit={handleIzinSubmit} className="space-y-6">
                 <div>
-                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-2">Jenis Pengajuan</label>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-3">Jenis Pengajuan</label>
                   <div className="grid grid-cols-3 gap-2">
                     {['izin', 'sakit', 'lupa_absen'].map((t) => (
-                      <button
-                        key={t}
-                        type="button"
-                        onClick={() => setIzinData({...izinData, jenis: t})}
-                        className={`py-3 rounded-xl border text-xs font-bold capitalize transition-all ${izinData.jenis === t ? 'bg-slate-900 border-slate-900 text-white' : 'border-slate-200 text-slate-400'}`}
+                      <button key={t} type="button" onClick={() => setIzinData({...izinData, jenis: t})}
+                        className={`py-3 rounded-lg border text-[10px] font-black uppercase transition-all ${izinData.jenis === t ? 'bg-sky-500 border-sky-500 text-white' : 'border-slate-100 text-slate-400'}`}
                       >
                         {t.replace('_', ' ')}
                       </button>
                     ))}
                   </div>
                 </div>
-
                 <div>
-                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-2">Alasan / Keterangan</label>
-                  <textarea
-                    required
-                    className="w-full bg-slate-50 border border-slate-100 rounded-xl p-4 text-sm font-medium focus:ring-2 ring-slate-900 transition-all outline-none min-h-[80px]"
-                    placeholder="Contoh: Sakit demam, perlu ke dokter..."
-                    value={izinData.keterangan}
-                    onChange={(e) => setIzinData({...izinData, keterangan: e.target.value})}
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-3">Keterangan</label>
+                  <textarea required value={izinData.keterangan} onChange={(e) => setIzinData({...izinData, keterangan: e.target.value})}
+                    className="w-full bg-slate-50 border border-slate-100 rounded-lg p-4 text-sm font-bold text-slate-900 focus:ring-2 ring-sky-500 outline-none min-h-[100px]"
+                    placeholder="Alasan pengajuan..."
                   />
                 </div>
-
                 <div>
-                   <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-2">Bukti Pendukung (Opsi)</label>
-                   <div className="flex gap-3 items-center">
+                   <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-3">Dokumen/Foto</label>
+                   <div className="flex gap-4 items-center">
                       <label className="flex-1 cursor-pointer">
-                         <div className="w-full h-24 rounded-xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center gap-1 hover:bg-slate-50 transition-all overflow-hidden relative">
-                            {izinPreview ? (
-                               <img src={izinPreview} className="w-full h-full object-cover" />
-                            ) : (
-                               <>
-                                  <Camera size={20} className="text-slate-400" />
-                                  <span className="text-[10px] font-bold text-slate-400">Pilih Foto / Dokumen</span>
-                               </>
-                            )}
+                         <div className="w-full h-24 rounded-lg border-2 border-dashed border-slate-200 flex flex-col items-center justify-center gap-2 hover:bg-slate-50 overflow-hidden relative">
+                            {izinPreview ? <img src={izinPreview} className="w-full h-full object-cover" /> : <Camera size={24} className="text-slate-300" />}
                          </div>
                          <input type="file" accept="image/*" onChange={handleIzinFileChange} className="hidden" />
                       </label>
                       {izinPreview && (
-                         <button type="button" onClick={() => { setIzinPreview(null); setIzinData({...izinData, foto: ''}) }} className="w-10 h-10 rounded-xl bg-rose-50 text-rose-500 flex items-center justify-center">
-                            <X size={18} />
+                         <button type="button" onClick={() => { setIzinPreview(null); setIzinData({...izinData, foto: ''}) }} className="w-12 h-12 bg-rose-50 text-rose-500 rounded-lg flex items-center justify-center border border-rose-100">
+                            <X size={20} />
                          </button>
                       )}
                    </div>
                 </div>
-
-                <button
-                  type="submit"
-                  disabled={isSubmittingIzin}
-                  className="w-full bg-slate-900 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2 disabled:opacity-50"
-                >
-                  {isSubmittingIzin ? <RefreshCw className="animate-spin" size={18} /> : <><Send size={18} /> Kirim Pengajuan</>}
+                <button type="submit" disabled={isSubmittingIzin} className="w-full bg-sky-500 hover:bg-sky-600 text-white font-black py-4 rounded-lg flex items-center justify-center gap-2 transition-all">
+                  {isSubmittingIzin ? <RefreshCw className="animate-spin" size={18} /> : <><Send size={18} /> KIRIM PENGAJUAN</>}
                 </button>
               </form>
             </div>
           </div>
         </div>
       )}
-      {/* SUCCESS MODAL PREMIUM */}
+
+      {/* SUCCESS MODAL - NO SHADOW */}
       {isSuccessModalOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-300">
-           <div className="bg-white w-full max-w-sm rounded-[40px] p-10 text-center shadow-2xl animate-in zoom-in duration-300 relative overflow-hidden">
-              {/* Decorative background element */}
-              <div className="absolute -top-24 -right-24 w-48 h-48 bg-emerald-50/50 rounded-full blur-3xl"></div>
-              
-              <div className={`w-20 h-20 mx-auto mb-8 rounded-3xl flex items-center justify-center ${waktuAbsen === 'Terkirim' ? 'bg-blue-50 text-blue-500' : 'bg-emerald-50 text-emerald-500'} shadow-inner`}>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-900/40 backdrop-blur-md animate-in fade-in">
+           <div className="bg-white w-full max-w-sm rounded-xl p-10 text-center border border-slate-200 relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 rounded-full -mr-10 -mt-10"></div>
+              <div className={`w-20 h-20 mx-auto mb-8 rounded-xl flex items-center justify-center ${waktuAbsen === 'Terkirim' ? 'bg-sky-50 text-sky-500 border border-sky-100' : 'bg-emerald-50 text-emerald-500 border border-emerald-100'}`}>
                  {waktuAbsen === 'Terkirim' ? <Send size={32} /> : <CheckCircle2 size={32} />}
               </div>
-
-              <h2 className="text-2xl font-black text-slate-900 mb-2">
-                 {waktuAbsen === 'Terkirim' ? 'Berhasil Terkirim!' : 'Presensi Berhasil!'}
-              </h2>
-              <p className="text-slate-400 text-sm font-medium mb-8 leading-relaxed">{successMsg}</p>
-
-              <div className="bg-slate-50 rounded-3xl p-6 mb-8 border border-slate-100/50">
-                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">
-                    {waktuAbsen === 'Terkirim' ? 'Status' : 'Waktu Absensi'}
-                 </p>
-                 <p className="text-2xl font-black text-slate-900 tracking-tight">
-                    {waktuAbsen === 'Terkirim' ? 'Menunggu Verifikasi' : waktuAbsen}
-                 </p>
+              <h2 className="text-2xl font-black text-slate-900 mb-2">{waktuAbsen === 'Terkirim' ? 'TERKIRIM!' : 'BERHASIL!'}</h2>
+              <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-10">{successMsg}</p>
+              <div className="bg-slate-50 rounded-xl p-6 mb-8 border border-slate-100">
+                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">{waktuAbsen === 'Terkirim' ? 'STATUS' : 'WAKTU PRESENSI'}</p>
+                 <p className="text-3xl font-black text-slate-900 tracking-tight">{waktuAbsen === 'Terkirim' ? 'PENDING' : waktuAbsen}</p>
               </div>
-
-              <button 
-                onClick={() => setIsSuccessModalOpen(false)}
-                className="w-full bg-slate-900 text-white font-black py-4 rounded-2xl hover:bg-black transition-all active:scale-95 shadow-xl shadow-slate-200"
-              >
-                Tutup
+              <button onClick={() => setIsSuccessModalOpen(false)} className="w-full bg-sky-500 hover:bg-sky-600 text-white font-black py-5 rounded-lg transition-all active:scale-95">
+                SELESAI
               </button>
            </div>
         </div>

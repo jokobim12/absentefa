@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { Eye, Edit, Trash2, Users, UserCheck, Clock, X, Star } from 'lucide-react';
+import { Eye, Edit, Trash2, Users, UserCheck, Clock, X, Star, Shield, User as UserIcon, Camera, UserX } from 'lucide-react';
 import ConfirmModal from '@/components/ConfirmModal';
+import FaceRegistration from '@/components/FaceRegistration';
 
 type UserData = {
   id: string;
@@ -12,25 +13,27 @@ type UserData = {
   status: string;
   points: number;
   created_at: string;
+  face_registered?: boolean;
 };
 
 export default function AdminUsersPage() {
   const [users, setUsers] = useState<UserData[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<UserData | null>(null);
   const [editMode, setEditMode] = useState(false);
   const [formData, setFormData] = useState({ name: '', role: '', status: '' });
   const [actionLoading, setActionLoading] = useState(false);
 
-  // New Confirm Modal State
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean;
     type: 'delete' | 'approve' | null;
     userId: string | null;
   }>({ isOpen: false, type: null, userId: null });
+
+  const [isFaceRegOpen, setIsFaceRegOpen] = useState(false);
+  const [faceRegTarget, setFaceRegTarget] = useState<string | null>(null);
 
   const supabase = createClient();
 
@@ -38,20 +41,24 @@ export default function AdminUsersPage() {
     setLoading(true);
     const { data, error } = await supabase
       .from('users')
-      .select('*')
+      .select(`
+        *,
+        user_faces(id)
+      `)
       .order('created_at', { ascending: false });
-      
+    
     if (!error && data) {
-      setUsers(data);
+      const formattedData = data.map((u: any) => ({
+        ...u,
+        face_registered: u.user_faces && u.user_faces.length > 0
+      }));
+      setUsers(formattedData);
     }
     setLoading(false);
   }
 
-  useEffect(() => {
-    fetchUsers();
-  }, []);
+  useEffect(() => { fetchUsers(); }, []);
 
-  // Summary counts
   const totalUsers = users.length;
   const approvedUsers = users.filter(u => u.status === 'approved').length;
   const pendingUsers = users.filter(u => u.status === 'pending').length;
@@ -78,42 +85,22 @@ export default function AdminUsersPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData)
       });
-      const data = await res.json();
-      if (res.ok) {
-        fetchUsers();
-        closeModal();
-      } else {
-        alert(`Gagal menyimpan: ${data.error}`);
-      }
-    } catch (e) {
-      alert('Terjadi kesalahan jaringan.');
-    } finally {
-      setActionLoading(false);
-    }
+      if (res.ok) { fetchUsers(); closeModal(); }
+    } catch (e) { alert('Gagal memproses.'); } finally { setActionLoading(false); }
   }
 
-  // --- ACTIONS WITH CONFIRMATION MODAL ---
-
-  const triggerDelete = (id: string) => {
-    setConfirmModal({ isOpen: true, type: 'delete', userId: id });
-  };
-
-  const triggerApprove = (id: string) => {
-    setConfirmModal({ isOpen: true, type: 'approve', userId: id });
-  };
+  const triggerDelete = (id: string) => setConfirmModal({ isOpen: true, type: 'delete', userId: id });
+  const triggerApprove = (id: string) => setConfirmModal({ isOpen: true, type: 'approve', userId: id });
 
   const handleConfirmedAction = async () => {
     const { type, userId } = confirmModal;
     if (!userId) return;
-
     setActionLoading(true);
     try {
       if (type === 'delete') {
         const res = await fetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
         if (res.ok) fetchUsers();
-        else alert('Gagal menghapus user.');
-      } 
-      else if (type === 'approve') {
+      } else if (type === 'approve') {
         const res = await fetch(`/api/admin/users/${userId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
@@ -121,291 +108,176 @@ export default function AdminUsersPage() {
         });
         if (res.ok) fetchUsers();
       }
-    } catch (e) {
-      alert('Terjadi kesalahan jaringan.');
-    } finally {
-      setActionLoading(false);
-      setConfirmModal({ isOpen: false, type: null, userId: null });
-    }
+    } catch (e) { alert('Gagal memproses.'); } 
+    finally { setActionLoading(false); setConfirmModal({ isOpen: false, type: null, userId: null }); }
   };
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
-      
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <div className="space-y-8 pb-20">
+      {/* Sharp Header */}
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 border-b border-slate-100 pb-8">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 mb-1">Manajemen User</h1>
-          <p className="text-slate-500 text-sm">Kelola data pegawai dan hak akses sistem.</p>
+           <div className="flex items-center gap-2 text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-2">
+             Direktori • Manajemen User
+           </div>
+           <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Kelola Seluruh Pegawai</h1>
         </div>
-        <button onClick={fetchUsers} className="btn-secondary text-sm shrink-0">
-          🔄 Refresh Data
+        <button onClick={fetchUsers} className="flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-600 rounded text-xs font-bold hover:bg-slate-200 transition-colors uppercase tracking-widest">
+           Refresh Data
         </button>
       </div>
 
-      {/* Summary Cards */}
+      {/* Metrics Small Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-         <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm flex items-center gap-4">
-            <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center">
-               <Users size={24} />
-            </div>
-            <div>
-               <p className="text-sm text-slate-500 font-medium">Total Terdaftar</p>
-               <h3 className="text-2xl font-bold text-slate-900">{totalUsers}</h3>
-            </div>
-         </div>
-         <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm flex items-center gap-4">
-            <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center">
-               <UserCheck size={24} />
-            </div>
-            <div>
-               <p className="text-sm text-slate-500 font-medium">Aktif / Disetujui</p>
-               <h3 className="text-2xl font-bold text-slate-900">{approvedUsers}</h3>
-            </div>
-         </div>
-         <div className="bg-white border border-rose-200 rounded-xl p-5 shadow-sm flex items-center gap-4 relative overflow-hidden">
-            {pendingUsers > 0 && <div className="absolute top-0 right-0 w-2 h-full bg-amber-400"></div>}
-            <div className="w-12 h-12 bg-amber-50 text-amber-600 rounded-lg flex items-center justify-center">
-               <Clock size={24} />
-            </div>
-            <div>
-               <p className="text-sm text-slate-500 font-medium">Pending Approval</p>
-               <h3 className="text-2xl font-bold text-slate-900">{pendingUsers}</h3>
-            </div>
-         </div>
-      </div>
-
-      {/* Main Table */}
-      <div className="card p-0 overflow-hidden border-slate-200 shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm text-slate-600">
-            <thead className="bg-slate-50 text-slate-700 font-medium border-b border-slate-200">
-              <tr>
-                <th className="px-5 py-4">Nama Lengkap</th>
-                <th className="px-5 py-4">Role</th>
-                <th className="px-5 py-4">Poin</th>
-                <th className="px-5 py-4">Status</th>
-                <th className="px-5 py-4 text-center">Aksi</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan={4} className="px-5 py-12 text-center">
-                    <div className="flex flex-col items-center justify-center">
-                       <svg className="w-8 h-8 text-blue-500 animate-spin mb-3" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                       </svg>
-                       <span className="text-slate-500 font-medium text-sm">Memuat data pengguna...</span>
-                    </div>
-                  </td>
-                </tr>
-              ) : users.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="px-5 py-12 text-center text-slate-500">
-                    Belum ada user yang terdaftar di database.
-                  </td>
-                </tr>
-              ) : (
-                users.map(user => (
-                  <tr key={user.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/50 transition-colors">
-                    <td className="px-5 py-3 font-medium text-slate-800">{user.name}</td>
-                    <td className="px-5 py-3">
-                      <span className={`px-2.5 py-1 rounded text-xs font-semibold ${user.role === 'admin' ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-700'}`}>
-                        {user.role}
-                      </span>
-                    </td>
-                    <td className="px-5 py-3">
-                      <div className="flex items-center gap-1.5 font-black text-slate-700">
-                        <Star size={14} className="text-amber-500 fill-amber-500" />
-                        {user.points || 0}
-                      </div>
-                    </td>
-                    <td className="px-5 py-3">
-                      {user.status === 'pending' && <span className="bg-amber-100 text-amber-700 px-2.5 py-1 rounded-full text-xs font-semibold inline-flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>Pending</span>}
-                      {user.status === 'approved' && <span className="bg-emerald-100 text-emerald-700 px-2.5 py-1 rounded-full text-xs font-semibold">Disetujui</span>}
-                      {user.status === 'rejected' && <span className="bg-rose-100 text-rose-700 px-2.5 py-1 rounded-full text-xs font-semibold">Ditolak</span>}
-                    </td>
-                    <td className="px-5 py-3">
-                      <div className="flex justify-center items-center gap-2">
-                        {user.status === 'pending' && (
-                           <button 
-                             onClick={() => triggerApprove(user.id)} 
-                             className="text-xs bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-1.5 rounded font-medium transition-colors shadow-sm"
-                           >
-                             Terima
-                           </button>
-                        )}
-                        <button 
-                          onClick={() => openModal(user, 'view')} 
-                          className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                          title="Detail / Lihat"
-                        >
-                          <Eye size={18} />
-                        </button>
-                        <button 
-                          onClick={() => openModal(user, 'edit')} 
-                          className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded transition-colors"
-                          title="Edit Akses"
-                        >
-                          <Edit size={18} />
-                        </button>
-                        <button 
-                          onClick={() => triggerDelete(user.id)} 
-                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors"
-                          title="Hapus Akun Permanen"
-                        >
-                          <Trash2 size={18} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Modal View/Edit User */}
-      {isModalOpen && selectedUser && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh]">
-            
-            {/* Modal Header */}
-            <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 bg-slate-50/50">
-              <h3 className="font-bold text-lg text-slate-800">
-                {editMode ? 'Edit Pengguna' : 'Detail Pengguna'}
-              </h3>
-              <button onClick={closeModal} className="text-slate-400 hover:text-slate-700 bg-white hover:bg-slate-100 rounded-full p-1 transition-colors border border-slate-200">
-                <X size={20} />
-              </button>
-            </div>
-
-            {/* Modal Body */}
-            <div className="p-6 overflow-y-auto space-y-5 flex-1">
-              {/* ID Info */}
-              <div className="flex flex-col gap-1">
-                 <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">User ID (Internal)</label>
-                 <code className="text-xs bg-slate-100 text-slate-600 p-2 rounded block w-full truncate border border-slate-200">
-                   {selectedUser.id}
-                 </code>
+         {[
+           { label: 'Total User', val: totalUsers, icon: Users, color: 'text-slate-900' },
+           { label: 'Aktif', val: approvedUsers, icon: UserCheck, color: 'text-emerald-600' },
+           { label: 'Menunggu', val: pendingUsers, icon: Clock, color: 'text-amber-500' }
+         ].map((stat, i) => (
+           <div key={i} className="bg-white border border-slate-200 p-4 rounded flex items-center gap-4">
+              <div className="w-8 h-8 rounded bg-slate-50 flex items-center justify-center text-slate-400">
+                 <stat.icon size={16} />
               </div>
+              <div>
+                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{stat.label}</p>
+                 <h3 className={`text-lg font-bold ${stat.color}`}>{stat.val}</h3>
+              </div>
+           </div>
+         ))}
+      </div>
 
-              {/* Name Field */}
-              <div className="flex flex-col gap-1">
-                 <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Nama Lengkap</label>
-                 {editMode ? (
-                   <input
-                     type="text"
-                     value={formData.name}
-                     onChange={(e) => setFormData({...formData, name: e.target.value})}
-                     className="input-field"
-                     placeholder="Nama lengkap pegawai"
-                   />
-                 ) : (
-                   <div className="text-sm font-medium text-slate-900 border border-transparent py-2">
-                     {selectedUser.name}
+      {/* Sharp Users Table */}
+      <div className="border border-slate-200 rounded overflow-hidden bg-white shadow-sm">
+        <table className="w-full text-left text-xs">
+          <thead className="bg-slate-50 border-b border-slate-200">
+            <tr>
+              <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Pegawai</th>
+              <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Akses</th>
+              <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Face ID</th>
+              <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Total Poin</th>
+              <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Status</th>
+              <th className="px-6 py-4 text-right text-[10px] font-black text-slate-400 uppercase tracking-widest">Aksi</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100 italic font-medium text-slate-400">
+            {loading ? (
+              <tr><td colSpan={5} className="p-20 text-center not-italic">Synchronizing user data...</td></tr>
+            ) : users.map(user => (
+              <tr key={user.id} className="hover:bg-slate-50/50 transition-colors not-italic text-slate-700">
+                <td className="px-6 py-4">
+                   <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded bg-slate-100 flex items-center justify-center text-slate-400">
+                        <UserIcon size={16} />
+                      </div>
+                      <span className="font-bold text-slate-900">{user.name}</span>
                    </div>
-                 )}
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                 {/* Role Field */}
-                 <div className="flex flex-col gap-1">
-                    <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Akses (Role)</label>
-                    {editMode ? (
-                      <select
-                        value={formData.role}
-                        onChange={(e) => setFormData({...formData, role: e.target.value})}
-                        className="input-field cursor-pointer"
-                      >
-                        <option value="pegawai">Pegawai</option>
-                        <option value="admin">Admin</option>
-                      </select>
+                </td>
+                <td className="px-6 py-4">
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest ${user.role === 'admin' ? 'bg-indigo-50 text-indigo-700 border border-indigo-100' : 'bg-slate-50 text-slate-500 border border-slate-100'}`}>
+                    {user.role}
+                  </span>
+                </td>
+                <td className="px-6 py-4">
+                  <div className="flex items-center gap-2">
+                    {user.face_registered ? (
+                       <div className="flex items-center gap-1.5 text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100">
+                          <UserCheck size={10} />
+                          <span className="text-[9px] font-black uppercase tracking-widest">AKTIF</span>
+                       </div>
                     ) : (
-                      <div className="text-sm py-2">
-                        <span className={`px-2.5 py-1 rounded text-xs font-semibold ${selectedUser.role === 'admin' ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-700'}`}>
-                          {selectedUser.role}
-                        </span>
-                      </div>
+                       <div className="flex items-center gap-1.5 text-slate-400 bg-slate-50 px-2 py-0.5 rounded border border-slate-100">
+                          <UserX size={10} />
+                          <span className="text-[9px] font-black uppercase tracking-widest">KOSONG</span>
+                       </div>
                     )}
-                 </div>
-
-                 {/* Status Field */}
-                 <div className="flex flex-col gap-1">
-                    <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Status Akun</label>
-                    {editMode ? (
-                      <select
-                        value={formData.status}
-                        onChange={(e) => setFormData({...formData, status: e.target.value})}
-                        className="input-field cursor-pointer"
+                    <button 
+                      onClick={() => {
+                        setFaceRegTarget(user.id);
+                        setIsFaceRegOpen(true);
+                      }}
+                      className="p-1 hover:text-sky-500 transition-colors"
+                      title="Daftar Wajah"
+                    >
+                      <Camera size={14} />
+                    </button>
+                    {user.face_registered && (
+                       <button 
+                        onClick={async () => {
+                          if (confirm('Hapus data wajah user ini?')) {
+                            const { error } = await supabase.from('user_faces').delete().eq('user_id', user.id);
+                            if (!error) fetchUsers();
+                          }
+                        }}
+                        className="p-1 hover:text-rose-500 transition-colors"
+                        title="Hapus Wajah"
                       >
-                        <option value="pending">Pending</option>
-                        <option value="approved">Approved</option>
-                        <option value="rejected">Rejected</option>
-                      </select>
-                    ) : (
-                      <div className="text-sm py-2">
-                         {selectedUser.status === 'pending' && <span className="bg-amber-100 text-amber-700 px-2.5 py-1 rounded-full text-xs font-semibold">Pending</span>}
-                         {selectedUser.status === 'approved' && <span className="bg-emerald-100 text-emerald-700 px-2.5 py-1 rounded-full text-xs font-semibold">Disetujui</span>}
-                         {selectedUser.status === 'rejected' && <span className="bg-rose-100 text-rose-700 px-2.5 py-1 rounded-full text-xs font-semibold">Ditolak</span>}
-                      </div>
+                        <Trash2 size={14} />
+                      </button>
                     )}
-                 </div>
-              </div>
-
-              {/* Points Display in Modal */}
-              {!editMode && selectedUser && (
-                 <div className="bg-amber-50 border border-amber-100 rounded-[24px] p-5 flex items-center justify-between shadow-sm">
-                    <div>
-                       <p className="text-[10px] font-black text-amber-700 uppercase tracking-[0.2em] mb-1">Total Perolehan Poin</p>
-                       <p className="text-3xl font-black text-amber-900 leading-none">{selectedUser.points || 0}</p>
-                    </div>
-                    <div className="w-12 h-12 bg-amber-500 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-amber-200">
-                       <Star size={24} className="fill-white" />
-                    </div>
-                 </div>
-              )}
-
-            </div>
-
-            {/* Modal Footer */}
-            <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/50 flex justify-end gap-3 rounded-b-2xl">
-              <button 
-                onClick={closeModal} 
-                className="btn-secondary px-5"
-                disabled={actionLoading}
-              >
-                {editMode ? 'Batal' : 'Tutup'}
-              </button>
-              
-              {editMode && (
-                <button 
-                  onClick={handleSaveEdit}
-                  disabled={actionLoading}
-                  className="bg-blue-600 hover:bg-blue-700 text-white font-medium px-5 py-2 rounded-md transition-colors shadow-sm disabled:opacity-50 flex items-center gap-2"
-                >
-                  {actionLoading ? (
-                    <>
-                      <svg className="w-4 h-4 text-white animate-spin" fill="none" viewBox="0 0 24 24">
-                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                      </svg>
-                      Menyimpan...
-                    </>
-                  ) : (
-                    'Simpan Perubahan'
+                  </div>
+                </td>
+                <td className="px-6 py-4 font-bold text-slate-900">{user.points || 0} Pts</td>
+                <td className="px-6 py-4">
+                   {user.status === 'pending' ? <span className="bg-amber-50 text-amber-600 px-2 py-0.5 rounded text-[10px] font-black uppercase border border-amber-100">Pending</span> :
+                    user.status === 'approved' ? <span className="bg-emerald-50 text-emerald-600 px-2 py-0.5 rounded text-[10px] font-black uppercase border border-emerald-100">Approved</span> :
+                    <span className="bg-rose-50 text-rose-600 px-2 py-0.5 rounded text-[10px] font-black uppercase border border-rose-100">Rejected</span>}
+                </td>
+                <td className="px-6 py-4 text-right flex justify-end gap-2">
+                  {user.status === 'pending' && (
+                    <button onClick={() => triggerApprove(user.id)} className="bg-slate-900 text-white px-3 py-1.5 rounded text-[10px] font-black uppercase tracking-widest hover:bg-black">Approve</button>
                   )}
-                </button>
-              )}
+                  <button onClick={() => openModal(user, 'view')} className="p-2 border border-slate-100 rounded text-slate-400 hover:text-slate-900"><Eye size={14} /></button>
+                  <button onClick={() => openModal(user, 'edit')} className="p-2 border border-slate-100 rounded text-slate-400 hover:text-amber-600"><Edit size={14} /></button>
+                  <button onClick={() => triggerDelete(user.id)} className="p-2 border border-slate-100 rounded text-slate-400 hover:text-rose-600"><Trash2 size={14} /></button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Minimalist Modal */}
+      {isModalOpen && selectedUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-slate-900/60 transition-all">
+          <div className="bg-white rounded border border-slate-200 w-full max-w-sm overflow-hidden flex flex-col shadow-2xl">
+            <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+              <h3 className="text-xs font-black uppercase tracking-widest text-slate-900">{editMode ? 'Edit User' : 'Informasi Pegawai'}</h3>
+              <button onClick={closeModal} className="text-slate-400 hover:text-slate-900"><X size={16} /></button>
             </div>
-            
+            <div className="p-6 space-y-4">
+               <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Nama Lengkap</label>
+                  {editMode ? <input value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full border border-slate-200 rounded p-2 text-xs font-bold" /> : <p className="text-sm font-bold text-slate-900">{selectedUser.name}</p>}
+               </div>
+               <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Hak Akses</label>
+                     {editMode ? <select value={formData.role} onChange={e => setFormData({...formData, role: e.target.value})} className="w-full border border-slate-200 rounded p-2 text-xs font-bold">
+                        <option value="pegawai">Pegawai</option><option value="admin">Admin</option>
+                     </select> : <p className="text-xs font-bold uppercase tracking-widest text-slate-500">{selectedUser.role}</p>}
+                  </div>
+                  <div className="space-y-1">
+                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Status Akun</label>
+                     {editMode ? <select value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})} className="w-full border border-slate-200 rounded p-2 text-xs font-bold">
+                        <option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option>
+                     </select> : <p className="text-xs font-bold uppercase tracking-widest text-slate-500">{selectedUser.status}</p>}
+                  </div>
+               </div>
+               {!editMode && (
+                  <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
+                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Akumulasi Poin</span>
+                     <span className="text-lg font-black text-amber-500">{selectedUser.points || 0} <span className="text-[10px]">Pts</span></span>
+                  </div>
+               )}
+            </div>
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex justify-end gap-2">
+               <button onClick={closeModal} className="px-4 py-2 border border-slate-200 rounded text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-white">{editMode ? 'Batal' : 'Tutup'}</button>
+               {editMode && <button onClick={handleSaveEdit} disabled={actionLoading} className="px-4 py-2 bg-slate-900 text-white rounded text-[10px] font-black uppercase tracking-widest hover:bg-black">Simpan</button>}
+            </div>
           </div>
         </div>
       )}
-      {/* Confirmation Modal */}
+
       <ConfirmModal
         isOpen={confirmModal.isOpen}
         onClose={() => setConfirmModal({ ...confirmModal, isOpen: false })}
@@ -413,13 +285,24 @@ export default function AdminUsersPage() {
         isLoading={actionLoading}
         variant={confirmModal.type === 'delete' ? 'danger' : 'info'}
         title={confirmModal.type === 'delete' ? 'Hapus Pengguna?' : 'Setujui Pendaftaran?'}
-        message={
-          confirmModal.type === 'delete' 
-          ? 'Tindakan ini permanen. Seluruh data absensi user ini juga akan ikut terhapus dari sistem.'
-          : 'User ini akan diberikan akses penuh untuk melakukan absensi setelah disetujui.'
-        }
-        confirmText={confirmModal.type === 'delete' ? 'Ya, Hapus' : 'Ya, Setujui'}
+        message={confirmModal.type === 'delete' ? 'Tindakan ini tidak dapat dibatalkan.' : 'Berikan akses penuh pada user ini.'}
+        confirmText="Konfirmasi"
       />
+
+      {isFaceRegOpen && faceRegTarget && (
+        <FaceRegistration 
+          targetUserId={faceRegTarget}
+          onSuccess={() => {
+            setIsFaceRegOpen(false);
+            setFaceRegTarget(null);
+            fetchUsers();
+          }}
+          onCancel={() => {
+            setIsFaceRegOpen(false);
+            setFaceRegTarget(null);
+          }}
+        />
+      )}
     </div>
   );
 }

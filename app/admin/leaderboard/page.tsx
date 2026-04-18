@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { formatTime } from '@/lib/utils';
-import { Users, Calendar, RefreshCw, Clock, CheckCircle2, AlertCircle, Moon, Sun, ShieldAlert, Download, UserCheck } from 'lucide-react';
+import { Users, Calendar, RefreshCw, Clock, CheckCircle2, AlertCircle, Play, ShieldAlert, Download, UserCheck, CalendarDays, Camera } from 'lucide-react';
 
 interface AttendanceEntry {
   user_id: string;
@@ -20,101 +20,97 @@ interface AttendanceEntry {
 
 export default function AdminLeaderboardPage() {
   const supabase = createClient();
+  const [selectedDate, setSelectedDate] = useState(new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Makassar' }).format(new Date()));
   const [entries, setEntries] = useState<AttendanceEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState('');
   const [todayDate, setTodayDate] = useState('');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   
-  // Holiday State
-  const [isHolidayAuto, setIsHolidayAuto] = useState(false);
   const [isHolidayManual, setIsHolidayManual] = useState(false);
+  const [isWorkDayOverride, setIsWorkDayOverride] = useState(false);
+  const [holidayLoading, setHolidayLoading] = useState(false);
+
+  async function fetchHolidayStatus() {
+    try {
+      const res = await fetch(`/api/admin/holidays?date=${selectedDate}`);
+      const json = await res.json();
+      if (json.success && json.data && json.data.length > 0) {
+        const record = json.data[0];
+        if (record.is_work_day) {
+          setIsWorkDayOverride(true);
+          setIsHolidayManual(false);
+        } else {
+          setIsHolidayManual(true);
+          setIsWorkDayOverride(false);
+        }
+      } else {
+        setIsHolidayManual(false);
+        setIsWorkDayOverride(false);
+      }
+    } catch (err) { console.error(err); }
+  }
+
+  async function toggleHoliday() {
+    setHolidayLoading(true);
+    
+    const currentlyHoliday = isTodayHoliday;
+    // Calculate weekend status for the selected date
+    const dateObj = new Date(selectedDate);
+    const dayName = new Intl.DateTimeFormat('en-US', { weekday: 'long', timeZone: 'Asia/Makassar' }).format(dateObj);
+    const isWeekendOfSelectedDate = dayName === 'Saturday' || dayName === 'Sunday';
+
+    try {
+      if (currentlyHoliday) {
+        if (isWeekendOfSelectedDate) {
+          await fetch('/api/admin/holidays', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ date: selectedDate, is_work_day: true, keterangan: 'Kerja Lembur Weekend' })
+          });
+        } else {
+          await fetch(`/api/admin/holidays?date=${selectedDate}`, { method: 'DELETE' });
+        }
+      } else {
+        if (isWeekendOfSelectedDate) {
+          await fetch(`/api/admin/holidays?date=${selectedDate}`, { method: 'DELETE' });
+        } else {
+          await fetch('/api/admin/holidays', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ date: selectedDate, is_work_day: false, keterangan: 'Libur Manual' })
+          });
+        }
+      }
+      await fetchHolidayStatus();
+      fetchLeaderboard();
+    } catch (err) { console.error(err); } finally { setHolidayLoading(false); }
+  }
 
   async function fetchLeaderboard() {
     setLoading(true);
-    const now = new Date();
+    const dateObj = new Date(selectedDate);
     
-    // WITA Check for weekend
-    const dayOfWeek = new Intl.DateTimeFormat('en-US', {
-      weekday: 'long',
-      timeZone: 'Asia/Makassar',
-    }).format(now);
-    
-    setIsHolidayAuto(dayOfWeek === 'Saturday' || dayOfWeek === 'Sunday');
-
-    const today = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'Asia/Makassar',
-    }).format(now);
-
     setTodayDate(
-      now.toLocaleDateString('id-ID', {
-        weekday: 'long',
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric',
-        timeZone: 'Asia/Makassar',
+      dateObj.toLocaleDateString('id-ID', {
+        weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC', // Menggunakan UTC karena selectedDate murni tanggal YYYY-MM-DD
       })
     );
 
-    // 1. Fetch ALL active employees
-    const { data: allUsers, error: userError } = await supabase
-      .from('users')
-      .select('id, name')
-      .eq('role', 'pegawai')
-      .eq('status', 'approved');
+    const { data: allUsers } = await supabase.from('users').select('id, name').eq('role', 'pegawai').eq('status', 'approved');
+    const { data: attendanceData } = await supabase.from('attendance').select('*').eq('tanggal', selectedDate);
 
-    if (userError) {
-      console.error('User fetch error:', userError);
-      setLoading(false);
-      return;
-    }
-
-    // 2. Fetch today's attendance
-    const { data: attendanceData, error: attendanceError } = await supabase
-      .from('attendance')
-      .select(`
-        id,
-        user_id,
-        waktu_absen,
-        foto_url,
-        status,
-        jenis,
-        approval_status
-      `)
-      .eq('tanggal', today);
-
-    if (attendanceError) {
-      console.error('Attendance fetch error:', attendanceError);
-      setLoading(false);
-      return;
-    }
-
-    // 3. Map everything into one structure
     const userMap: Record<string, AttendanceEntry> = {};
-    
-    allUsers.forEach(u => {
+    (allUsers || []).forEach(u => {
       userMap[u.id] = {
-        user_id: u.id,
-        name: u.name,
-        masuk_time: null,
-        pulang_time: null,
-        masuk_status: null,
-        pulang_status: null,
-        masuk_id: null,
-        approval_status: null,
-        foto_url: null,
-        has_alpa: false
+        user_id: u.id, name: u.name, masuk_time: null, pulang_time: null, masuk_status: null, pulang_status: null, masuk_id: null, approval_status: null, foto_url: null, has_alpa: false
       };
     });
 
     (attendanceData || []).forEach((item: any) => {
       const uid = item.user_id;
       if (!userMap[uid]) return;
-
-      if (item.status === 'alpa') {
-        userMap[uid].has_alpa = true;
-        return;
-      }
+      if (item.status === 'alpa') { userMap[uid].has_alpa = true; return; }
 
       if (item.jenis === 'masuk') {
         userMap[uid].masuk_time = item.waktu_absen;
@@ -125,349 +121,261 @@ export default function AdminLeaderboardPage() {
       } else if (item.jenis === 'pulang') {
         userMap[uid].pulang_time = item.waktu_absen;
         userMap[uid].pulang_status = item.status;
-      } else if (item.jenis === 'izin' || item.jenis === 'sakit' || item.jenis === 'lupa_absen') {
+      } else if (['izin', 'sakit', 'lupa_absen'].includes(item.jenis)) {
         userMap[uid].masuk_time = item.waktu_absen;
         userMap[uid].masuk_status = item.jenis.toUpperCase().replace('_', ' ');
         userMap[uid].approval_status = item.approval_status;
-        userMap[uid].masuk_id = item.id; // Map the ID so it can be restored
+        userMap[uid].masuk_id = item.id;
       }
     });
 
     setEntries(Object.values(userMap));
-    setLastUpdated(
-      new Date().toLocaleTimeString('id-ID', {
-        hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Asia/Makassar',
-      })
-    );
+    setLastUpdated(new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Makassar' }));
     setLoading(false);
   }
 
-  // Time Picker Modal State
-  const [isTimeModalOpen, setIsTimeModalOpen] = useState(false);
-  const [selectedLupaId, setSelectedLupaId] = useState<string | null>(null);
-  const [masukTimeInput, setMasukTimeInput] = useState('08:00');
-  const [pulangTimeInput, setPulangTimeInput] = useState('16:00');
-
-
+  // Restore & Alpa functions removed for brevity but they should be there
   async function handleRestore(attendanceId: string, isLupa: boolean = false) {
     if (!attendanceId) return;
-
     if (isLupa && !isTimeModalOpen) {
       setSelectedLupaId(attendanceId);
       setIsTimeModalOpen(true);
       return;
     }
-
     setActionLoading(attendanceId);
     try {
       const res = await fetch('/api/admin/attendance/restore', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          attendanceId,
-          masukTime: isLupa ? masukTimeInput : undefined,
-          pulangTime: isLupa ? pulangTimeInput : undefined
-        })
+        body: JSON.stringify({ attendanceId, masukTime: isLupa ? masukTimeInput : undefined, pulangTime: isLupa ? pulangTimeInput : undefined })
       });
       if (res.ok) { 
-        setIsTimeModalOpen(false);
+        setIsTimeModalOpen(false); 
         fetchLeaderboard(); 
+      } else {
+        const errData = await res.json();
+        alert(errData.error || 'Gagal memulihkan presensi');
       }
-      else { const err = await res.json(); alert(err.error); }
-    } catch (err) { console.error(err); } finally { setActionLoading(null); }
+    } catch (err) { 
+      console.error(err); 
+      alert('Masalah koneksi ke server');
+    } finally { 
+      setActionLoading(null); 
+    }
   }
 
   async function handleAlpa(userId: string) {
-    if (!confirm('Apakah Anda yakin ingin memberikan penalti Alpa (-5 poin) kepada pegawai ini?')) return;
-    
-    const today = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'Asia/Makassar',
-    }).format(new Date());
-
+    if (!confirm('Berikan penalti Alpa (-5)?')) return;
     setActionLoading(userId);
     try {
-      const res = await fetch('/api/admin/attendance/alpa', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId, date: today })
+      const res = await fetch('/api/admin/attendance/alpa', { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' }, 
+        body: JSON.stringify({ userId, date: selectedDate }) 
       });
-      if (res.ok) { fetchLeaderboard(); }
-      else { const err = await res.json(); alert(err.error); }
+      if (res.ok) fetchLeaderboard();
     } catch (err) { console.error(err); } finally { setActionLoading(null); }
   }
 
   async function handleCancelAlpa(userId: string) {
-    const today = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'Asia/Makassar',
-    }).format(new Date());
-
     setActionLoading(userId + '_cancel');
     try {
-      const res = await fetch('/api/admin/attendance/alpa/cancel', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId, date: today })
+      const res = await fetch('/api/admin/attendance/alpa/cancel', { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' }, 
+        body: JSON.stringify({ userId, date: selectedDate }) 
       });
-      if (res.ok) { fetchLeaderboard(); }
-      else { const err = await res.json(); alert(err.error); }
+      if (res.ok) fetchLeaderboard();
     } catch (err) { console.error(err); } finally { setActionLoading(null); }
   }
 
-  useEffect(() => {
-    fetchLeaderboard();
-  }, []);
+  const [isTimeModalOpen, setIsTimeModalOpen] = useState(false);
+  const [selectedLupaId, setSelectedLupaId] = useState<string | null>(null);
+  const [masukTimeInput, setMasukTimeInput] = useState('08:00');
+  const [pulangTimeInput, setPulangTimeInput] = useState('16:00');
 
-  const isTodayHoliday = isHolidayAuto || isHolidayManual;
+  // Weekend Check based on selectedDate
+  const dateObj = new Date(selectedDate);
+  const dayName = new Intl.DateTimeFormat('en-US', { weekday: 'long', timeZone: 'Asia/Makassar' }).format(dateObj);
+  const isWeekendOfSelectedDate = dayName === 'Saturday' || dayName === 'Sunday';
+  
+  // Logic: Holiday if (Weekend AND NOT overridden to work) OR (Manual Holiday record)
+  const isTodayHoliday = (isWeekendOfSelectedDate && !isWorkDayOverride) || isHolidayManual;
+
+  useEffect(() => { 
+    fetchLeaderboard(); 
+    fetchHolidayStatus();
+  }, [selectedDate]); // Reload on date change
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6 pb-20">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <div className="space-y-8 pb-20 text-slate-900">
+      {/* Sharp Header */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 border-b border-slate-100 pb-8">
         <div>
-          <h1 className="text-2xl font-black text-slate-900 mb-1 flex items-center gap-3">
-            Rekap Kehadiran
-            {isTodayHoliday && (
-              <span className="bg-amber-100 text-amber-700 text-[10px] px-2 py-1 rounded-full uppercase tracking-widest font-black">Libur</span>
-            )}
-          </h1>
-          <p className="text-slate-400 text-xs flex items-center gap-2 font-medium">
-            <Calendar size={14} className="text-slate-300" /> {todayDate}
-          </p>
+           <div className="flex items-center gap-2 text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-2">
+             <CalendarDays size={14} /> Dashboard • Rekap Harian
+           </div>
+           <div className="flex items-center gap-3">
+             <h1 className="text-2xl font-bold text-slate-900 tracking-tight">{todayDate}</h1>
+             {isTodayHoliday && (
+               <span className="px-2 py-0.5 bg-amber-100 text-amber-700 text-[10px] font-black uppercase tracking-widest rounded">Libur</span>
+             )}
+           </div>
         </div>
-        <div className="flex gap-2">
-          <button 
-            onClick={() => setIsHolidayManual(!isHolidayManual)} 
-            className={`text-[10px] font-black uppercase tracking-widest px-4 py-2.5 rounded-2xl border transition-all flex items-center gap-2 shadow-sm ${isHolidayManual ? 'bg-amber-500 border-amber-500 text-white' : 'bg-white border-slate-100 text-slate-600 hover:bg-slate-50'}`}
-          >
-            {isHolidayManual ? <Sun size={14} /> : <Moon size={14} />}
-            {isHolidayManual ? 'Aktifkan Jam Kerja' : 'Liburkan Hari Ini'}
-          </button>
-          <button onClick={fetchLeaderboard} className="w-10 h-10 bg-white border border-slate-100 rounded-2xl flex items-center justify-center text-slate-400 hover:text-slate-900 transition-all shadow-sm">
-            <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
-          </button>
-        </div>
-      </div>
+        <div className="flex flex-wrap items-center gap-3">
+           <div className="flex border border-slate-200 rounded overflow-hidden h-10 bg-white">
+             <div className="flex items-center px-3 bg-slate-50 border-r border-slate-200">
+                <Calendar size={14} className="text-slate-400" />
+             </div>
+             <input 
+               type="date" 
+               value={selectedDate}
+               onChange={(e) => setSelectedDate(e.target.value)}
+               className="bg-transparent border-none text-xs font-bold text-slate-700 focus:ring-0 px-4 cursor-pointer hover:bg-slate-50"
+             />
+           </div>
 
-      {/* Stats Summary */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white p-6 rounded-[32px] border border-slate-100 shadow-sm flex items-center gap-5">
-          <div className="w-14 h-14 bg-slate-50 text-slate-600 rounded-2xl flex items-center justify-center">
-            <Users size={24} />
-          </div>
-          <div>
-            <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Pegawai Aktif</p>
-            <h3 className="text-2xl font-black text-slate-900 leading-none mt-1">{entries.length}</h3>
-          </div>
-        </div>
-        <div className="bg-white p-6 rounded-[32px] border border-emerald-50 shadow-sm flex items-center gap-5">
-          <div className="w-14 h-14 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center">
-            <UserCheck size={24} />
-          </div>
-          <div>
-            <p className="text-[10px] text-emerald-400 font-black uppercase tracking-widest">Hadir / Izin</p>
-            <h3 className="text-2xl font-black text-slate-900 leading-none mt-1">{entries.filter(e => e.masuk_time).length}</h3>
-          </div>
-        </div>
-        <div className="bg-white p-6 rounded-[32px] border border-rose-50 shadow-sm flex items-center gap-5">
-          <div className="w-14 h-14 bg-rose-50 text-rose-600 rounded-2xl flex items-center justify-center">
-            <ShieldAlert size={24} />
-          </div>
-          <div>
-            <p className="text-[10px] text-rose-400 font-black uppercase tracking-widest">Belum Hadir</p>
-            <h3 className="text-2xl font-black text-slate-900 leading-none mt-1">{entries.filter(e => !e.masuk_time && !isTodayHoliday).length}</h3>
-          </div>
+           <button 
+             onClick={toggleHoliday}
+             disabled={holidayLoading}
+             className={`px-4 py-2 rounded text-xs font-black uppercase tracking-widest border transition-all h-10 ${isTodayHoliday ? 'bg-amber-100 border-amber-200 text-amber-700' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'} disabled:opacity-50`}
+           >
+             {holidayLoading ? '...' : isTodayHoliday ? 'Aktifkan Kerja' : 'Liburkan'}
+           </button>
+           
+           <button onClick={fetchLeaderboard} className="h-10 w-10 flex items-center justify-center border border-slate-200 rounded text-slate-400 hover:text-slate-900 bg-white shadow-sm">
+             <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
+           </button>
         </div>
       </div>
 
-      {/* Unified Recap Table */}
-      <div className="bg-white rounded-[32px] border border-slate-100 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead>
-              <tr className="bg-slate-50/50 border-b border-slate-100">
-                <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Pegawai</th>
-                <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Masuk</th>
-                <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Pulang</th>
-                <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Status / Aksi</th>
-                <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Bukti</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {loading && entries.length === 0 ? (
-                <tr><td colSpan={5} className="px-8 py-20 text-center text-slate-400 text-sm font-medium italic">Menyiapkan data kehadiran...</td></tr>
-              ) : entries.length === 0 ? (
-                <tr><td colSpan={5} className="px-8 py-20 text-center text-slate-400 text-sm font-medium italic">Tidak ada pegawai yang terdaftar.</td></tr>
-              ) : (
-                entries.map((entry) => (
-                  <tr key={entry.user_id} className="hover:bg-slate-50/30 transition-all group">
-                    <td className="px-8 py-6">
-                       <div className="font-bold text-slate-900">{entry.name}</div>
-                       <div className="text-[9px] text-slate-300 font-mono hidden uppercase">Emp ID: {entry.user_id.slice(0, 6)}</div>
-                    </td>
-                    <td className="px-8 py-6">
-                      {entry.masuk_time ? (
-                        <div className="flex flex-col">
-                           <span className="font-black text-slate-900 text-sm font-mono">{formatTime(entry.masuk_time)}</span>
-                           <span className={`text-[9px] font-bold uppercase tracking-widest mt-0.5 ${entry.masuk_status === 'terlambat' ? 'text-rose-500' : 'text-emerald-500'}`}>
-                              {entry.masuk_status}
-                           </span>
-                        </div>
-                      ) : (
-                        <span className="text-slate-300 text-xs font-medium italic">{isTodayHoliday ? 'Libur' : 'Menunggu...'}</span>
-                      )}
-                    </td>
-                    <td className="px-8 py-6">
-                      {entry.pulang_time ? (
-                        <div className="flex flex-col">
-                           <span className="font-black text-slate-900 text-sm font-mono">{formatTime(entry.pulang_time)}</span>
-                           <span className="text-[9px] font-bold uppercase text-blue-500 tracking-widest mt-0.5">Berakhir</span>
-                        </div>
-                      ) : (
-                        <span className="text-slate-100 text-xs">-</span>
-                      )}
-                    </td>
-                    <td className="px-8 py-6">
-                       <div className="flex items-center gap-3">
-                          {/* ALPA ACTION */}
-                          {!entry.masuk_time && !isTodayHoliday && !entry.has_alpa && (
-                             <button
-                               onClick={() => handleAlpa(entry.user_id)}
-                               disabled={actionLoading === entry.user_id}
-                               className="bg-slate-50 border border-slate-100 text-slate-400 hover:bg-rose-50 hover:border-rose-100 hover:text-rose-600 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all active:scale-95 flex items-center gap-2"
-                             >
-                               {actionLoading === entry.user_id ? <RefreshCw className="animate-spin" size={12} /> : <ShieldAlert size={12} />}
-                               Alpa (-5)
-                             </button>
-                          )}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+         {[
+           { label: 'Total Pegawai', val: entries.length, icon: Users, color: 'text-slate-900' },
+           { label: 'Hadir / Izin', val: entries.filter(e => e.masuk_time).length, icon: UserCheck, color: 'text-emerald-600' },
+           { label: 'Belum Hadir', val: entries.filter(e => !e.masuk_time && !isTodayHoliday).length, icon: ShieldAlert, color: 'text-rose-600' },
+           { label: 'Update', val: lastUpdated, icon: Clock, color: 'text-slate-400' }
+         ].map((stat, i) => (
+           <div key={i} className="bg-white border border-slate-200 p-5 rounded">
+              <div className="flex justify-between items-start mb-2">
+                 <stat.icon size={16} className="text-slate-300" />
+                 <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{stat.label}</span>
+              </div>
+              <h3 className={`text-xl font-bold ${stat.color}`}>{stat.val}</h3>
+           </div>
+         ))}
+      </div>
 
-                          {entry.has_alpa && (
-                             <div className="flex items-center gap-2">
-                                <span className="bg-rose-50 text-rose-500 px-3 py-1.5 rounded-xl text-[10px] font-black border border-rose-100 uppercase tracking-widest">ALPA (-5)</span>
-                                <button
-                                   onClick={() => handleCancelAlpa(entry.user_id)}
-                                   disabled={actionLoading === entry.user_id + '_cancel'}
-                                   className="text-[10px] font-bold text-slate-400 hover:text-rose-600 transition-colors uppercase tracking-tight"
-                                >
-                                   {actionLoading === entry.user_id + '_cancel' ? <RefreshCw className="animate-spin" size={12} /> : 'Batal'}
-                                </button>
-                             </div>
-                          )}
-
-                          {/* LATE RESTORE ACTION */}
-                          {entry.masuk_status === 'terlambat' && entry.approval_status !== 'dispute_approved' && (
-                             <button
-                               onClick={() => handleRestore(entry.masuk_id!)}
-                               disabled={actionLoading === entry.masuk_id}
-                               className="bg-amber-50 text-amber-600 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border border-amber-100"
-                             >
-                                {actionLoading === entry.masuk_id ? <RefreshCw className="animate-spin" size={12} /> : <CheckCircle2 size={12} />}
-                                Pulihkan Poin
-                             </button>
-                          )}
-                          
-                          {entry.approval_status === 'dispute_approved' && (
-                             <span className="bg-emerald-50 text-emerald-600 px-3 py-1.5 rounded-xl text-[10px] font-black border border-emerald-100 uppercase tracking-widest">Normal (Pulih)</span>
-                          )}
-
-                          {entry.masuk_status === 'IZIN' || entry.masuk_status === 'SAKIT' || entry.masuk_status === 'LUPA ABSEN' ? (
-                             <div className="flex items-center gap-2">
-                                <span className={`px-3 py-1.5 rounded-xl text-[10px] font-black border uppercase tracking-widest ${
-                                   entry.masuk_status === 'LUPA ABSEN' 
-                                   ? 'bg-amber-50 text-amber-600 border-amber-100' 
-                                   : 'bg-blue-50 text-blue-600 border-blue-100'
-                                }`}>
-                                   {entry.masuk_status}
-                                </span>
-                                
-                                {entry.approval_status !== 'dispute_approved' && (
-                                   <button
-                                      onClick={() => handleRestore(entry.masuk_id!, entry.masuk_status === 'LUPA ABSEN')}
-                                      disabled={actionLoading === entry.masuk_id}
-                                      className="text-[10px] font-bold text-slate-400 hover:text-emerald-600 transition-colors uppercase tracking-tight"
-                                   >
-                                      {actionLoading === entry.masuk_id ? <RefreshCw className="animate-spin" size={12} /> : 'Pulihkan'}
-                                   </button>
-                                )}
-                             </div>
-                          ) : (
-                            entry.masuk_time && !entry.approval_status && entry.masuk_status !== 'terlambat' && (
-                              <span className="bg-emerald-50 text-emerald-600 px-3 py-1.5 rounded-xl text-[10px] font-black border border-emerald-100 uppercase tracking-widest">Hadir</span>
-                            )
-                          )}
-                       </div>
-                    </td>
-                    <td className="px-8 py-6">
-                      <div className="flex justify-center">
-                        {entry.foto_url ? (
-                          <a href={entry.foto_url} target="_blank" rel="noreferrer" className="w-10 h-10 rounded-xl border border-slate-100 overflow-hidden block shadow-sm hover:scale-105 transition-all">
-                            <img src={entry.foto_url} alt={entry.name} className="w-full h-full object-cover" />
-                          </a>
-                        ) : (
-                          <div className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-200">
-                             <Clock size={16} />
-                          </div>
+      {/* Main Table */}
+      <div className="border border-slate-200 rounded overflow-hidden shadow-sm bg-white">
+        <table className="w-full text-left">
+          <thead className="bg-slate-50 border-b border-slate-200">
+            <tr>
+              <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Nama Pegawai</th>
+              <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Masuk</th>
+              <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Pulang</th>
+              <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Status / Aksi Manual</th>
+              <th className="px-6 py-4 text-center text-[10px] font-black text-slate-400 uppercase tracking-widest">Foto</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100 italic text-slate-500 font-medium text-xs">
+            {loading ? (
+              <tr><td colSpan={5} className="p-20 text-center not-italic">Syncing live data...</td></tr>
+            ) : entries.map(e => (
+              <tr key={e.user_id} className="hover:bg-slate-50/50 transition-colors not-italic text-slate-700">
+                <td className="px-6 py-4 font-bold text-slate-900">{e.name}</td>
+                <td className="px-6 py-4">
+                  {e.masuk_time ? <div className="space-y-0.5">
+                    <div className="font-bold text-sm">{formatTime(e.masuk_time)}</div>
+                    <div className={`text-[9px] font-black uppercase tracking-tighter ${e.masuk_status === 'terlambat' ? 'text-rose-600' : 'text-slate-400'}`}>{e.masuk_status}</div>
+                  </div> : <span className="text-slate-200">-</span>}
+                </td>
+                <td className="px-6 py-4">
+                  {e.pulang_time ? <div className="font-bold text-sm">{formatTime(e.pulang_time)}</div> : <span className="text-slate-200">-</span>}
+                </td>
+                <td className="px-6 py-4">
+                  <div className="flex items-center gap-3">
+                    {/* Status Display */}
+                    {e.has_alpa ? (
+                      <div className="flex items-center gap-2">
+                        <span className="px-2 py-0.5 border border-rose-200 bg-rose-50 text-rose-700 text-[10px] font-black uppercase">ALPA</span>
+                        <button onClick={() => handleCancelAlpa(e.user_id)} className="text-[10px] font-bold text-slate-300 hover:text-rose-600">Batal</button>
+                      </div>
+                    ) : (e.masuk_status === 'IZIN' || e.masuk_status === 'SAKIT') ? (
+                      <div className="flex items-center gap-2">
+                        <span className={`px-2 py-0.5 text-[9px] font-black uppercase border rounded ${
+                          e.masuk_status === 'SAKIT' ? 'bg-amber-50 text-amber-600 border-amber-100' : 'bg-blue-50 text-blue-600 border-blue-100'
+                        }`}>
+                          {e.masuk_status}
+                        </span>
+                      </div>
+                    ) : (e.masuk_status === 'LUPA ABSEN') ? (
+                      <div className="flex items-center gap-2">
+                        <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-[9px] font-black uppercase border border-slate-200 rounded">{e.masuk_status}</span>
+                        {e.approval_status !== 'dispute_approved' && (
+                          <button 
+                            disabled={!!actionLoading}
+                            onClick={() => handleRestore(e.masuk_id!, true)} 
+                            className="px-2 py-0.5 border border-slate-200 rounded text-[9px] font-black uppercase text-slate-400 hover:bg-slate-900 hover:text-white hover:border-slate-900 transition-all disabled:opacity-50"
+                          >
+                            {actionLoading === e.masuk_id ? '...' : 'Pulihkan'}
+                          </button>
                         )}
                       </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-      
-      <div className="text-center">
-         <p className="text-[10px] font-black text-slate-300 uppercase tracking-[0.4em]">Terakhir diperbarui: {lastUpdated}</p>
+                    ) : e.masuk_time ? (
+                      <div className="flex items-center gap-2">
+                         <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 text-[10px] font-black uppercase border border-emerald-100">Verified</span>
+                         {e.masuk_status === 'terlambat' && e.approval_status !== 'dispute_approved' && (
+                           <button 
+                             disabled={!!actionLoading}
+                             onClick={() => handleRestore(e.masuk_id!)} 
+                             className="px-2 py-0.5 border border-slate-200 rounded text-[9px] font-black uppercase text-slate-400 hover:bg-emerald-600 hover:text-white hover:border-emerald-600 transition-all disabled:opacity-50"
+                           >
+                             {actionLoading === e.masuk_id ? '...' : 'Pulihkan'}
+                           </button>
+                         )}
+                      </div>
+                    ) : !isTodayHoliday && (
+                      <button onClick={() => handleAlpa(e.user_id)} className="px-3 py-1 bg-slate-900 text-white text-[10px] font-bold rounded hover:bg-black uppercase">Alpha</button>
+                    )}
+                  </div>
+                </td>
+                <td className="px-6 py-4 text-center">
+                  {e.foto_url ? (
+                    <a href={e.foto_url} target="_blank" rel="noreferrer" className="w-8 h-8 rounded bg-slate-100 overflow-hidden inline-block border border-slate-200">
+                      <img src={e.foto_url} className="w-full h-full object-cover" />
+                    </a>
+                  ) : <Camera size={14} className="mx-auto text-slate-100" />}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
 
-      {/* Time Selection Modal for Lupa Absen */}
+      {/* Lupa Absen Modal - Sharp */}
       {isTimeModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-sm rounded-[32px] p-8 shadow-2xl border border-slate-100 animate-in fade-in zoom-in duration-200">
-            <div className="w-16 h-16 bg-amber-50 text-amber-500 rounded-2xl flex items-center justify-center mb-6">
-              <Clock size={32} />
-            </div>
-            
-            <h3 className="text-xl font-black text-slate-900 mb-2">Lengkapi Jam Kerja</h3>
-            <p className="text-slate-500 text-sm mb-6 font-medium">Pegawai ini lupa absen. Mohon tentukan jam masuk dan pulang aslinya untuk rekap bulanan.</p>
-
-            <div className="space-y-4 mb-8">
-              <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">Jam Masuk</label>
-                <input 
-                  type="time" 
-                  value={masukTimeInput}
-                  onChange={(e) => setMasukTimeInput(e.target.value)}
-                  className="w-full bg-slate-50 border-none rounded-2xl px-4 py-3 font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 transition-all"
-                />
+        <div className="fixed inset-0 bg-slate-900/60 z-50 flex items-center justify-center p-6">
+           <div className="bg-white w-full max-w-sm rounded border border-slate-200 p-8 shadow-2xl">
+              <h3 className="text-xl font-bold mb-1">Set Jam Manual</h3>
+              <p className="text-xs text-slate-400 mb-6">Lengkapi data jam kerja untuk rekap bulanan.</p>
+              
+              <div className="grid grid-cols-2 gap-4 mb-8">
+                 <div className="space-y-1">
+                    <label className="text-[10px] font-bold uppercase text-slate-400">Jam Masuk</label>
+                    <input type="time" value={masukTimeInput} onChange={e => setMasukTimeInput(e.target.value)} className="w-full border border-slate-200 rounded p-2 text-sm font-bold" />
+                 </div>
+                 <div className="space-y-1">
+                    <label className="text-[10px] font-bold uppercase text-slate-400">Jam Pulang</label>
+                    <input type="time" value={pulangTimeInput} onChange={e => setPulangTimeInput(e.target.value)} className="w-full border border-slate-200 rounded p-2 text-sm font-bold" />
+                 </div>
               </div>
-              <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">Jam Pulang</label>
-                <input 
-                  type="time" 
-                  value={pulangTimeInput}
-                  onChange={(e) => setPulangTimeInput(e.target.value)}
-                  className="w-full bg-slate-50 border-none rounded-2xl px-4 py-3 font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 transition-all"
-                />
-              </div>
-            </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <button 
-                onClick={() => setIsTimeModalOpen(false)}
-                className="py-4 rounded-2xl font-black text-xs uppercase tracking-widest text-slate-400 hover:bg-slate-50 transition-all"
-              >
-                Batal
-              </button>
-              <button 
-                onClick={() => handleRestore(selectedLupaId!, true)}
-                className="py-4 bg-amber-500 rounded-2xl font-black text-xs uppercase tracking-widest text-white shadow-lg shadow-amber-200 hover:bg-amber-600 active:scale-95 transition-all flex items-center justify-center gap-2"
-              >
-                {actionLoading ? <RefreshCw className="animate-spin text-white" size={16} /> : 'Simpan Presensi'}
-              </button>
-            </div>
-          </div>
+              <div className="flex gap-2">
+                 <button onClick={() => setIsTimeModalOpen(false)} className="flex-1 py-3 border border-slate-200 rounded text-xs font-bold hover:bg-slate-50">Batal</button>
+                 <button onClick={() => handleRestore(selectedLupaId!, true)} className="flex-1 py-3 bg-slate-900 text-white rounded text-xs font-bold hover:bg-black shadow-lg">Simpan</button>
+              </div>
+           </div>
         </div>
       )}
     </div>

@@ -40,7 +40,7 @@ export async function PATCH(request: NextRequest) {
 
     if (!adminUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const { id, action, customPoints } = await request.json(); // action: 'approve' | 'reject', customPoints: number
+    const { id, action, customPoints } = await request.json(); 
     if (!id || !action) return NextResponse.json({ error: 'Missing ID or action' }, { status: 400 });
 
     const adminClient = createAdminClient();
@@ -55,16 +55,56 @@ export async function PATCH(request: NextRequest) {
     if (getError || !attendance) return NextResponse.json({ error: 'Data not found' }, { status: 404 });
     if (attendance.approval_status !== 'pending') return NextResponse.json({ error: 'Already processed' }, { status: 400 });
 
-    // 2. Tentukan pengurangan poin berdasarkan peraturan atau input custom
+    // 2. Logika Poin Otomatis
     let finalPointsChange = 0;
     const finalStatus = action === 'approve' ? 'approved' : 'rejected';
 
-    if (customPoints !== undefined) {
-       finalPointsChange = parseInt(customPoints);
+    if (action === 'reject') {
+      // Cek apakah hari ini sudah ada rekaman 'masuk' atau 'pulang' yang sudah approved
+      // Jika ada, maka penolakan izin/sakit (iseng-iseng) tidak perlu denda
+      const { count: presenceCount } = await adminClient
+        .from('attendance')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', attendance.user_id)
+        .eq('tanggal', attendance.tanggal)
+        .in('jenis', ['masuk', 'pulang'])
+        .in('approval_status', ['approved', 'dispute_approved']);
+
+      finalPointsChange = (presenceCount || 0) > 0 ? 0 : -5; 
     } else {
-       if (attendance.jenis === 'izin' || attendance.jenis === 'sakit') {
-          finalPointsChange = action === 'approve' ? -3 : -5;
-       }
+      // SETUJU
+      if (customPoints !== undefined) {
+        finalPointsChange = parseInt(customPoints);
+      } else {
+        const type = attendance.jenis.toLowerCase();
+        
+        if (type === 'lupa_absen') {
+          finalPointsChange = 0;
+        } else if (type === 'izin' || type === 'sakit') {
+          // HITUNG DATA MINGGUAN (Senin - Minggu)
+          // Tentukan hari Senin terdekat (WITA)
+          const now = new Date();
+          const day = now.getDay(); // 0 is Sunday, 1 is Monday
+          const diffToMonday = day === 0 ? 6 : day - 1;
+          const monday = new Date(now);
+          monday.setDate(now.getDate() - diffToMonday);
+          monday.setHours(0, 0, 0, 0);
+          
+          const mondayDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Makassar' }).format(monday);
+
+          // Cek berapa kali sudah izin/sakit di minggu ini yang sudah disetujui
+          const { count } = await adminClient
+            .from('attendance')
+            .select('*', { count: 'exact', head: true })
+            .eq('user_id', attendance.user_id)
+            .in('jenis', ['izin', 'sakit'])
+            .in('approval_status', ['approved', 'dispute_approved'])
+            .gte('tanggal', mondayDate);
+
+          // Aturan: Izin pertama gratis (0), kedua dst (-1)
+          finalPointsChange = (count || 0) === 0 ? 0 : -1;
+        }
+      }
     }
 
     // 3. Update Record
@@ -89,7 +129,8 @@ export async function PATCH(request: NextRequest) {
 
     return NextResponse.json({ 
       success: true, 
-      message: `Presensi berhasil ${action === 'approve' ? 'disetujui' : 'ditolak'}.` 
+      message: `Presensi berhasil ${action === 'approve' ? 'disetujui' : 'ditolak'}.`,
+      points_applied: finalPointsChange
     });
 
   } catch (err: any) {
