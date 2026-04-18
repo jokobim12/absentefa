@@ -24,7 +24,7 @@ export default function AdminFaceAttendance() {
   const [loading, setLoading] = useState(true);
   const [faceapi, setFaceapi] = useState<any>(null);
   const [modelsLoaded, setModelsLoaded] = useState(false);
-  const [labeledDescriptors, setLabeledDescriptors] = useState<faceapi.LabeledFaceDescriptors[]>([]);
+  const [labeledDescriptors, setLabeledDescriptors] = useState<any[]>([]);
   const [lastMatchedUser, setLastMatchedUser] = useState<any>(null);
   const [showSuccess, setShowSuccess] = useState(false);
   const [message, setMessage] = useState('Menginisialisasi Sistem Bio-Scanner...');

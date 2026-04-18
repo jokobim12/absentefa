@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { formatTime } from '@/lib/utils';
 import Link from 'next/link';
-import { Trophy, Medal, Award, ChevronLeft, RefreshCw, Clock } from 'lucide-react';
+import { Trophy, Medal, Award, ChevronLeft, RefreshCw, Clock, User } from 'lucide-react';
 
 interface AttendanceEntry {
   rank: number;
